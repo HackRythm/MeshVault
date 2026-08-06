@@ -3,11 +3,12 @@ import Card from './ui/Card';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
 import { dsaApi, logApi, projectApi } from '../services/api';
-import { HiShieldCheck, HiPlus, HiClock } from 'react-icons/hi';
+import { HiShieldCheck, HiPlus, HiClock, HiRewind } from 'react-icons/hi';
 
 export default function AuditTrail() {
   const [logs, setLogs] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [stackLogs, setStackLogs] = useState([]);
   const [merkleResult, setMerkleResult] = useState(null);
   const [merkleTree, setMerkleTree] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -16,8 +17,12 @@ export default function AuditTrail() {
   const [showAddLog, setShowAddLog] = useState(false);
   const [logForm, setLogForm] = useState({ project: '', content: '' });
 
+  // Phase mode state: 'midsem' (Simple BST + Stack) or 'endsem' (Merkle + AVL Tree)
+  const [engineMode, setEngineMode] = useState('midsem');
+
   useEffect(() => {
     loadData();
+    loadStack();
   }, []);
 
   const loadData = async () => {
@@ -33,10 +38,23 @@ export default function AuditTrail() {
     setLoading(false);
   };
 
+  const loadStack = async () => {
+    try {
+      const { data } = await dsaApi.stackGet();
+      setStackLogs(data.stack || []);
+    } catch { /* ok */ }
+  };
+
   const handleAddLog = async (e) => {
     e.preventDefault();
     try {
       await logApi.create(logForm);
+      // Push to Mid-Sem stack
+      try {
+        await dsaApi.stackPush('ADD_LOG', { content: logForm.content, project: logForm.project });
+        await loadStack();
+      } catch { /* ok */ }
+
       setShowAddLog(false);
       setLogForm({ project: '', content: '' });
       loadData();
@@ -45,33 +63,32 @@ export default function AuditTrail() {
     }
   };
 
+  const handleStackPop = async () => {
+    try {
+      const { data } = await dsaApi.stackPop();
+      if (data.popped) {
+        await loadStack();
+      }
+    } catch (err) {
+      console.error('Stack pop failed:', err);
+    }
+  };
+
   const handleBuildMerkle = async () => {
     setBuilding(true);
     try {
       const logContents = logs.map(l => l.content);
       if (logContents.length === 0) {
-        // Demo with sample data
         const sampleLogs = [
-          'Implemented AVL tree rotations — LL, RR, LR, RL cases',
-          'Added SHA-256 hashing to update log entries',
-          'Completed priority queue with min-heap for deadlines',
-          'Built trie search index for project autocomplete',
-          'Sprint 1 completed — 87.5% utilization via knapsack DP',
+          'Simple BST timestamp indexing configured',
+          'Stack LIFO undo/redo trail initialized',
+          'Doubly LinkedList activity feed populated',
+          'Priority Queue deadlines operational',
         ];
         const { data: buildData } = await dsaApi.buildMerkle(sampleLogs);
         setMerkleResult({ built: true, ...buildData });
         const { data: treeData } = await dsaApi.getMerkleTree();
         setMerkleTree(treeData);
-        // Also index these in AVL tree
-        try {
-          const now = Date.now() / 1000;
-          await dsaApi.indexLogs(sampleLogs.map((content, i) => ({
-            timestamp: now - (sampleLogs.length - i) * 3600,
-            content,
-            project: 'Demo',
-            user: 'System',
-          })));
-        } catch { /* ok */ }
       } else {
         const { data: buildData } = await dsaApi.buildMerkle(logContents);
         setMerkleResult({ built: true, ...buildData });
@@ -90,11 +107,10 @@ export default function AuditTrail() {
       const logContents = logs.length > 0
         ? logs.map(l => l.content)
         : [
-          'Implemented AVL tree rotations — LL, RR, LR, RL cases',
-          'Added SHA-256 hashing to update log entries',
-          'Completed priority queue with min-heap for deadlines',
-          'Built trie search index for project autocomplete',
-          'Sprint 1 completed — 87.5% utilization via knapsack DP',
+          'Simple BST timestamp indexing configured',
+          'Stack LIFO undo/redo trail initialized',
+          'Doubly LinkedList activity feed populated',
+          'Priority Queue deadlines operational',
         ];
       const { data } = await dsaApi.verifyMerkle(logContents);
       setMerkleResult((prev) => ({ ...prev, ...data }));
@@ -104,139 +120,170 @@ export default function AuditTrail() {
     setVerifying(false);
   };
 
-  const truncateHash = (hash) => {
-    if (!hash) return '—';
-    return `${hash.slice(0, 8)}...${hash.slice(-8)}`;
-  };
-
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h3 className="text-lg font-semibold text-heading">Audit Trail</h3>
-          <p className="text-xs text-muted mt-0.5">SHA-256 Merkle Tree verification · AVL Tree chronological indexing</p>
+          <h3 className="text-lg font-semibold text-heading">Audit Trail & Log Index</h3>
+          <p className="text-xs text-muted mt-0.5">
+            {engineMode === 'midsem'
+              ? 'Phase 1 (Mid-Sem): Simple BST timestamp indexing & Stack LIFO history'
+              : 'Phase 2 (End-Sem): SHA-256 Merkle Tree & Self-Balancing AVL Tree'}
+          </p>
         </div>
-        <div className="flex gap-2">
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Mode Switcher */}
+          <div className="flex items-center bg-canvas p-1 rounded-xl border border-border">
+            <button
+              onClick={() => setEngineMode('midsem')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                engineMode === 'midsem'
+                  ? 'bg-accent text-white shadow-glow-sm'
+                  : 'text-muted hover:text-heading'
+              }`}
+            >
+              🔹 Mid-Sem (Light DSAs)
+            </button>
+            <button
+              onClick={() => setEngineMode('endsem')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                engineMode === 'endsem'
+                  ? 'bg-accent text-white shadow-glow-sm'
+                  : 'text-muted hover:text-heading'
+              }`}
+            >
+              🔸 End-Sem (Advanced DSAs)
+            </button>
+          </div>
+
           <Button variant="secondary" size="sm" onClick={() => setShowAddLog(true)} icon={<HiPlus />}>
             Add Log
-          </Button>
-          <Button variant="secondary" size="sm" onClick={handleBuildMerkle} loading={building} icon="🌳">
-            Build Merkle Tree
-          </Button>
-          <Button
-            variant="success" size="sm"
-            onClick={handleVerify} loading={verifying}
-            icon={<HiShieldCheck />}
-            disabled={!merkleResult?.built}
-          >
-            Verify Integrity
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Merkle Tree Visualization & Status */}
+        {/* Left Panel */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Verification Status */}
-          <Card hover={false} padding="p-5">
-            <h4 className="text-sm font-semibold text-heading mb-3">Verification Status</h4>
-            {merkleResult ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  {merkleResult.verified ? (
-                    <Badge variant="success" icon="🛡️">SHA-256 Merkle Verified</Badge>
-                  ) : merkleResult.verified === false && merkleResult.message?.includes('FAILURE') ? (
-                    <Badge variant="alert" icon="⚠️">Integrity Compromised</Badge>
-                  ) : (
-                    <Badge variant="warning" icon="⏳">Tree Built — Ready to Verify</Badge>
-                  )}
+          {engineMode === 'midsem' ? (
+            /* Mid-Sem Panel: Stack & Simple BST controls */
+            <>
+              {/* Stack Action Card */}
+              <Card hover={false} padding="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-heading">Audit Log Stack (LIFO)</h4>
+                  <Badge variant="accent font-mono">Stack</Badge>
+                </div>
+                <p className="text-xs text-muted mb-4 leading-relaxed">
+                  Last-In, First-Out stack for tracking recent user actions and supporting single-step Undo/Rollback operations.
+                </p>
+
+                <div className="flex gap-2 mb-4">
+                  <Button
+                    variant="secondary" size="sm" className="w-full"
+                    onClick={handleStackPop} disabled={stackLogs.length === 0}
+                    icon={<HiRewind />}
+                  >
+                    Undo Top Action (Pop)
+                  </Button>
                 </div>
 
-                {merkleResult.root_hash && (
-                  <div className="bg-canvas rounded-lg p-3 mt-2">
-                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">Merkle Root</p>
-                    <p className="font-mono text-xs text-accent break-all">{merkleResult.root_hash || merkleResult.expected_root}</p>
-                  </div>
-                )}
-
-                {merkleResult.leaf_count && (
-                  <div className="flex gap-3 text-xs">
-                    <div className="bg-canvas rounded-lg px-3 py-2 flex-1 text-center">
-                      <p className="text-muted">Leaves</p>
-                      <p className="text-heading font-semibold">{merkleResult.leaf_count}</p>
-                    </div>
-                    <div className="bg-canvas rounded-lg px-3 py-2 flex-1 text-center">
-                      <p className="text-muted">Levels</p>
-                      <p className="text-heading font-semibold">{merkleResult.tree_levels || '—'}</p>
-                    </div>
-                  </div>
-                )}
-
-                {merkleResult.message && (
-                  <p className={`text-xs ${merkleResult.verified ? 'text-success' : 'text-alert'}`}>
-                    {merkleResult.message}
+                <div className="space-y-2">
+                  <p className="text-[10px] text-muted uppercase tracking-wider font-semibold">
+                    Current Stack ({stackLogs.length})
                   </p>
-                )}
-              </div>
-            ) : (
-              <div className="text-center py-4">
-                <p className="text-3xl mb-2">🌳</p>
-                <p className="text-sm text-muted">Build a Merkle tree to start verification</p>
-              </div>
-            )}
-          </Card>
-
-          {/* Tree Visualization */}
-          {merkleTree && (
-            <Card hover={false} padding="p-5">
-              <h4 className="text-sm font-semibold text-heading mb-3">Tree Structure</h4>
-              <div className="space-y-2">
-                {[...merkleTree.tree].reverse().map((level, li) => (
-                  <div key={li}>
-                    <p className="text-[10px] text-muted uppercase tracking-wider mb-1">
-                      {li === 0 ? '🏛️ Root' : li === merkleTree.tree.length - 1 ? '🍃 Leaves' : `Level ${merkleTree.levels - 1 - li}`}
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      {level.map((hash, hi) => (
-                        <span
-                          key={hi}
-                          className={`font-mono text-[9px] px-1.5 py-0.5 rounded ${
-                            li === 0 ? 'bg-accent/10 text-accent' : 'bg-canvas text-muted'
-                          }`}
-                          title={hash}
-                        >
-                          {hash.slice(0, 8)}…
-                        </span>
+                  {stackLogs.length > 0 ? (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {stackLogs.map((item, idx) => (
+                        <div key={idx} className="bg-canvas rounded-lg p-2 text-xs flex justify-between items-center border border-border/50">
+                          <span className="text-heading font-medium truncate">{item.action || item.content}</span>
+                          <span className="text-[9px] text-accent font-mono">#{stackLogs.length - idx}</span>
+                        </div>
                       ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+                  ) : (
+                    <p className="text-xs text-muted italic">Stack is empty.</p>
+                  )}
+                </div>
+              </Card>
 
-          {/* Algorithm Info */}
-          <Card hover={false} padding="p-4">
-            <p className="text-[10px] uppercase tracking-widest text-muted font-medium mb-2">DSA Engines Active</p>
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                <span className="text-xs text-body">SHA-256 Merkle Tree</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-success" />
-                <span className="text-xs text-body">AVL Tree (Log Index)</span>
-              </div>
-            </div>
-          </Card>
+              {/* Simple BST Summary */}
+              <Card hover={false} padding="p-4">
+                <p className="text-[10px] uppercase tracking-widest text-muted font-medium mb-2">Phase 1 Active Engine</p>
+                <div className="space-y-1.5 text-xs text-body">
+                  <p><strong className="text-heading">Simple BST:</strong> Logs indexed by timestamp for $O(\log N)$ average lookups.</p>
+                  <p><strong className="text-heading">Doubly LinkedList:</strong> Sequential chronological activity feed.</p>
+                </div>
+              </Card>
+            </>
+          ) : (
+            /* End-Sem Panel: Merkle Tree & AVL Tree controls */
+            <>
+              <Card hover={false} padding="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-semibold text-heading">Merkle Integrity Engine</h4>
+                  <Badge variant="accent">SHA-256</Badge>
+                </div>
+                <div className="flex gap-2 mb-4">
+                  <Button variant="secondary" size="sm" onClick={handleBuildMerkle} loading={building} icon="🌳">
+                    Build Tree
+                  </Button>
+                  <Button
+                    variant="success" size="sm" onClick={handleVerify}
+                    loading={verifying} icon={<HiShieldCheck />}
+                    disabled={!merkleResult?.built}
+                  >
+                    Verify
+                  </Button>
+                </div>
+
+                {merkleResult && (
+                  <div className="bg-canvas rounded-lg p-3 space-y-1 text-xs">
+                    <p className="text-[10px] text-muted uppercase">Merkle Root</p>
+                    <p className="font-mono text-accent text-[11px] break-all">{merkleResult.root_hash || merkleResult.expected_root || '—'}</p>
+                    {merkleResult.message && (
+                      <p className={`mt-2 font-medium ${merkleResult.verified ? 'text-success' : 'text-alert'}`}>
+                        {merkleResult.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </Card>
+
+              {merkleTree && (
+                <Card hover={false} padding="p-5">
+                  <h4 className="text-sm font-semibold text-heading mb-3">Tree Structure</h4>
+                  <div className="space-y-2">
+                    {[...merkleTree.tree].reverse().map((level, li) => (
+                      <div key={li}>
+                        <p className="text-[10px] text-muted uppercase tracking-wider mb-1">
+                          {li === 0 ? '🏛️ Root' : `Level ${merkleTree.levels - 1 - li}`}
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {level.map((hash, hi) => (
+                            <span key={hi} className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-canvas text-muted">
+                              {hash.slice(0, 8)}…
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </>
+          )}
         </div>
 
-        {/* Right: Chronological Log Timeline */}
+        {/* Right Panel: Logs Timeline */}
         <div className="lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-sm font-semibold text-heading">Update Log Timeline</h4>
-            <Badge variant="accent" icon="🌲">AVL-Indexed</Badge>
+            <h4 className="text-sm font-semibold text-heading">Chronological Log Timeline</h4>
+            <Badge variant="accent">
+              {engineMode === 'midsem' ? 'Simple BST Indexed' : 'AVL Tree Indexed'}
+            </Badge>
           </div>
 
           {loading ? (
@@ -250,45 +297,22 @@ export default function AuditTrail() {
             </div>
           ) : logs.length > 0 ? (
             <div className="relative">
-              {/* Timeline line */}
               <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-border" />
-
               <div className="space-y-3">
                 {logs.map((log, i) => (
-                  <div key={log._id || i} className="relative flex gap-4 animate-slide-up" style={{ animationDelay: `${i * 50}ms` }}>
-                    {/* Dot */}
-                    <div className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
-                      ${log.verified ? 'bg-success/20 border-2 border-success' : 'bg-surface border-2 border-border'}`}>
-                      {log.verified
-                        ? <HiShieldCheck className="text-success text-sm" />
-                        : <HiClock className="text-muted text-sm" />
-                      }
+                  <div key={log._id || i} className="relative flex gap-4 animate-slide-up">
+                    <div className="relative z-10 w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-surface border-2 border-border">
+                      <HiClock className="text-muted text-sm" />
                     </div>
 
-                    {/* Content */}
                     <Card className="flex-1" padding="px-4 py-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm text-heading">{log.content}</p>
-                          <div className="flex items-center gap-2 mt-2 flex-wrap">
-                            <span className="text-[10px] text-muted">
-                              {new Date(log.createdAt).toLocaleString()}
-                            </span>
-                            {log.project?.title && (
-                              <Badge variant="accent">{log.project.title}</Badge>
-                            )}
-                            {log.user?.name && (
-                              <span className="text-[10px] text-muted">by {log.user.name}</span>
-                            )}
+                          <div className="flex items-center gap-2 mt-2 flex-wrap text-[10px] text-muted">
+                            <span>{new Date(log.createdAt).toLocaleString()}</span>
+                            {log.project?.title && <Badge variant="accent">{log.project.title}</Badge>}
                           </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                          {log.verified && <Badge variant="success">✓ Verified</Badge>}
-                          {log.merkleHash && (
-                            <span className="font-mono text-[9px] text-muted" title={log.merkleHash}>
-                              {truncateHash(log.merkleHash)}
-                            </span>
-                          )}
                         </div>
                       </div>
                     </Card>
@@ -300,17 +324,7 @@ export default function AuditTrail() {
             <Card hover={false} className="text-center py-12">
               <div className="text-5xl mb-3">📝</div>
               <h4 className="text-heading font-semibold">No update logs yet</h4>
-              <p className="text-muted text-sm mt-1">
-                Add logs to build an audit trail, then verify with SHA-256 Merkle Tree
-              </p>
-              <div className="mt-4 flex justify-center gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setShowAddLog(true)} icon={<HiPlus />}>
-                  Add First Log
-                </Button>
-                <Button variant="primary" size="sm" onClick={handleBuildMerkle} loading={building} icon="🌳">
-                  Demo with Sample Data
-                </Button>
-              </div>
+              <p className="text-muted text-xs mt-1">Add logs to build an audit trail</p>
             </Card>
           )}
         </div>

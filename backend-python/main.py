@@ -1,25 +1,31 @@
 """
-MeshVault FastAPI Microservice
-==============================
-REST API exposing DSA engine operations for the Academic Project Manager.
-Handles compute-heavy operations: deadline priority queues, chronological
-log indexing, Merkle tree verification, sprint optimization, and autocomplete.
+MeshVault Mid-Sem FastAPI Microservice
+====================================
+REST API exposing lightweight Data Structure & Algorithm operations
+for the Mid-Sem Evaluation:
+
+Data Structures Implemented:
+  1. Stack (LIFO - Action Undo & Audit Log Stack)
+  2. Queue (FIFO - Sequential Task Queue & Greedy Sprint Allocator)
+  3. Doubly LinkedList (Activity Feed Navigation Trail)
+  4. Simple BST (Unbalanced Timestamp-based Log Indexing)
+  5. Min-Heap Priority Queue (Urgent Deliverable Deadlines)
 """
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 import time
 
-from dsa_engine import MinHeapPQ, AVLTree, MerkleTree, KnapsackDP, Trie
+from dsa_engine import Stack, Queue, DoublyLinkedList, SimpleBST, MinHeapPQ
 
 # ─── FastAPI App ──────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="MeshVault DSA Engine",
-    description="Data Structure & Algorithm microservice for the Academic Project Manager",
-    version="1.0.0"
+    title="MeshVault Mid-Sem DSA Engine",
+    description="Minimal Data Structure & Algorithm microservice for Mid-Sem evaluation",
+    version="1.0.0-midsem"
 )
 
 # CORS — allow React frontend
@@ -33,36 +39,41 @@ app.add_middleware(
 
 # ─── In-Memory DSA Instances ─────────────────────────────────────────
 
+audit_stack = Stack()
+task_queue = Queue()
+activity_dll = DoublyLinkedList()
+simple_log_bst = SimpleBST()
 deadline_queue = MinHeapPQ()
-log_tree = AVLTree()
-merkle_tree = MerkleTree()
-search_trie = Trie()
 
-# Pre-populate trie with sample terms for demo
-_sample_terms = [
-    "Advanced DSA", "Algorithm Analysis", "AVL Tree",
-    "Binary Search", "BFS Traversal", "Balanced Trees",
-    "Complexity Analysis", "Course Project", "Capstone",
-    "Data Structures", "Dynamic Programming", "Dijkstra",
-    "Graph Theory", "Greedy Algorithms",
-    "Hash Tables", "Heap Sort",
-    "Knapsack Problem", "KMP Algorithm",
-    "Linked List", "Log Analysis",
-    "Merkle Tree", "Minimum Spanning Tree", "MeshVault",
-    "Network Flow", "NP-Complete",
-    "Operating Systems", "Optimization",
-    "Priority Queue", "Python FastAPI", "Project Management",
-    "Quick Sort", "Queue Implementation",
-    "Red-Black Tree", "Recursion",
-    "SHA-256", "Sprint Planning", "Stack",
-    "Trie Structure", "Topological Sort",
-    "Union-Find",
+# Seed sample data for Mid-Sem demo
+_sample_logs = [
+    {"timestamp": 1700000000.0, "content": "Project MeshVault created", "project": "MeshVault", "user": "admin"},
+    {"timestamp": 1700000100.0, "content": "Updated database schema", "project": "MeshVault", "user": "dev1"},
+    {"timestamp": 1700000200.0, "content": "Added Mid-Sem DSA engines", "project": "MeshVault", "user": "dev2"},
 ]
-for term in _sample_terms:
-    search_trie.insert(term)
+
+for log in _sample_logs:
+    simple_log_bst.insert(log["timestamp"], log)
+    audit_stack.push(log)
+    activity_dll.append(log)
 
 
 # ─── Pydantic Models ─────────────────────────────────────────────────
+
+class StackPushRequest(BaseModel):
+    action: str
+    details: Optional[dict] = None
+
+
+class QueueItem(BaseModel):
+    name: str
+    weight: int = Field(..., ge=1, description="Hours required")
+    value: int = Field(..., ge=1, description="Priority impact score")
+
+
+class QueueBatchRequest(BaseModel):
+    items: list[QueueItem]
+
 
 class DeadlineItem(BaseModel):
     id: str
@@ -92,73 +103,163 @@ class RangeQuery(BaseModel):
     end: float
 
 
-class MerkleBuildRequest(BaseModel):
-    logs: list[str] = Field(..., description="List of log content strings to hash")
-
-
-class MerkleVerifyRequest(BaseModel):
-    logs: list[str] = Field(..., description="List of log content strings to verify against stored root")
-
-
-class Task(BaseModel):
-    name: str
-    weight: int = Field(..., ge=1, description="Hours required")
-    value: int = Field(..., ge=1, description="Priority × impact score")
-
-
 class SprintOptimizeRequest(BaseModel):
-    tasks: list[Task]
+    tasks: list[QueueItem]
     capacity: int = Field(..., ge=1, description="Sprint capacity in hours")
 
 
-class TrieInsertRequest(BaseModel):
-    terms: list[str]
-
-
-# ─── Health Check ─────────────────────────────────────────────────────
+# ─── Health Check & Phase Metadata ─────────────────────────────────────
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
-        "service": "MeshVault DSA Engine",
-        "version": "1.0.0",
-        "engines": {
-            "deadline_queue_size": deadline_queue.size(),
-            "log_tree_size": log_tree.size(),
-            "merkle_leaf_count": merkle_tree.leaf_count,
-            "trie_word_count": search_trie.size()
+        "service": "MeshVault Mid-Sem DSA Engine",
+        "version": "1.0.0-midsem",
+        "active_dsas": {
+            "stack_size": audit_stack.size(),
+            "queue_size": task_queue.size(),
+            "linked_list_size": activity_dll.size(),
+            "simple_bst_size": simple_log_bst.size(),
+            "deadline_queue_size": deadline_queue.size()
         }
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  DEADLINE PRIORITY QUEUE ENDPOINTS (MinHeap)
-# ═══════════════════════════════════════════════════════════════════════
+@app.get("/api/dsa/phase-info")
+async def get_phase_info():
+    """Return phase architectural breakdown for academic evaluation."""
+    return {
+        "evaluation_phase": "Mid-Sem Evaluation",
+        "active_light_dsas": [
+            {"name": "Stack", "purpose": "LIFO Undo/Redo & Audit Log History Stack"},
+            {"name": "Queue", "purpose": "FIFO Task Execution & Greedy Sprint Queue"},
+            {"name": "Doubly LinkedList", "purpose": "Bi-directional Activity Navigation Trail"},
+            {"name": "Simple BST", "purpose": "Timestamp-based Log Indexing without AVL rotations"},
+            {"name": "Min-Heap PQ", "purpose": "Urgent Review Deadlines Priority Queue"}
+        ],
+        "future_implementation": [
+            "AVL Tree (End-Sem)",
+            "Merkle Tree (End-Sem)",
+            "0-1 Knapsack Dynamic Programming (End-Sem)",
+            "Trie Tree Autocomplete (End-Sem)"
+        ]
+    }
+
+
+# =======================================================================
+#  MID-SEM LIGHT DSA ENDPOINTS
+# =======================================================================
+
+# ─── 1. STACK ENDPOINTS ────────────────────────────────────────────────
+
+@app.post("/api/dsa/midsem/stack/push")
+async def stack_push(request: StackPushRequest):
+    """Push an entry onto the Audit Stack."""
+    entry = {"action": request.action, "details": request.details, "timestamp": time.time()}
+    audit_stack.push(entry)
+    return {"message": "Pushed to stack", "size": audit_stack.size(), "top": entry}
+
+
+@app.post("/api/dsa/midsem/stack/pop")
+async def stack_pop():
+    """Pop the top item from the Audit Stack (Undo operation)."""
+    item = audit_stack.pop()
+    if not item:
+        raise HTTPException(status_code=404, detail="Audit stack is empty")
+    return {"popped": item, "remaining_size": audit_stack.size()}
+
+
+@app.get("/api/dsa/midsem/stack")
+async def get_stack():
+    """Get all items in the Audit Stack (Top to Bottom)."""
+    return {"stack": audit_stack.to_list(), "count": audit_stack.size()}
+
+
+# ─── 2. QUEUE & GREEDY SPRINT ENDPOINTS ────────────────────────────────
+
+@app.post("/api/dsa/midsem/queue/enqueue")
+async def queue_enqueue(batch: QueueBatchRequest):
+    """Enqueue tasks into the FIFO task queue."""
+    for item in batch.items:
+        task_queue.enqueue(item.model_dump())
+    return {"message": f"Enqueued {len(batch.items)} task(s)", "queue_size": task_queue.size()}
+
+
+@app.get("/api/dsa/midsem/queue")
+async def get_queue():
+    """Get all tasks in the FIFO Queue."""
+    return {"queue": task_queue.to_list(), "count": task_queue.size()}
+
+
+@app.post("/api/dsa/midsem/sprint/greedy")
+async def sprint_greedy(request: SprintOptimizeRequest):
+    """Mid-Sem Greedy / FIFO Queue Task Scheduler."""
+    temp_q = Queue()
+    for task in request.tasks:
+        temp_q.enqueue(task.model_dump())
+    result = temp_q.process_greedy_sprint(request.capacity)
+    return result
+
+
+# ─── 3. DOUBLY LINKED LIST ENDPOINTS ───────────────────────────────────
+
+@app.post("/api/dsa/midsem/linkedlist/append")
+async def dll_append(log: LogEntry):
+    """Append activity log to Doubly Linked List."""
+    entry = log.model_dump()
+    activity_dll.append(entry)
+    return {"message": "Appended to Linked List", "size": activity_dll.size()}
+
+
+@app.get("/api/dsa/midsem/linkedlist")
+async def get_dll(reverse: bool = False):
+    """Get all activity feed logs from Doubly Linked List."""
+    return {"logs": activity_dll.to_list(reverse=reverse), "count": activity_dll.size()}
+
+
+# ─── 4. SIMPLE BST ENDPOINTS ───────────────────────────────────────────
+
+@app.post("/api/dsa/midsem/bst/index")
+async def bst_index_logs(batch: LogBatch):
+    """Insert logs into Simple BST indexed by timestamp."""
+    for entry in batch.entries:
+        simple_log_bst.insert(entry.timestamp, entry.model_dump())
+    return {"message": f"Indexed {len(batch.entries)} log(s) in Simple BST", "bst_size": simple_log_bst.size()}
+
+
+@app.get("/api/dsa/midsem/bst")
+async def get_bst_logs():
+    """Get all logs in-order from Simple BST."""
+    return {"logs": simple_log_bst.in_order(), "count": simple_log_bst.size()}
+
+
+@app.post("/api/dsa/midsem/bst/range")
+async def query_bst_range(query: RangeQuery):
+    """Query logs within timestamp range using Simple BST."""
+    results = simple_log_bst.range_query(query.start, query.end)
+    return {"logs": results, "count": len(results), "range": {"start": query.start, "end": query.end}}
+
+
+# ─── 5. MIN-HEAP PRIORITY QUEUE ENDPOINTS ──────────────────────────────
 
 @app.post("/api/dsa/deadlines")
 async def add_deadlines(batch: DeadlineBatch):
     """Add one or more deadline items to the priority queue."""
     for item in batch.items:
         deadline_queue.insert(item.model_dump())
-    return {
-        "message": f"Added {len(batch.items)} deadline(s)",
-        "queue_size": deadline_queue.size()
-    }
+    return {"message": f"Added {len(batch.items)} deadline(s)", "queue_size": deadline_queue.size()}
 
 
 @app.get("/api/dsa/deadlines")
 async def get_all_deadlines():
     """Get all deadlines sorted by earliest first."""
-    return {
-        "deadlines": deadline_queue.get_all_sorted(),
-        "count": deadline_queue.size()
-    }
+    return {"deadlines": deadline_queue.get_all_sorted(), "count": deadline_queue.size()}
 
 
 @app.get("/api/dsa/deadlines/next")
 async def get_next_deadline():
-    """Peek at the next (most urgent) deadline without removing it."""
+    """Peek at the next (most urgent) deadline."""
     item = deadline_queue.peek()
     if not item:
         raise HTTPException(status_code=404, detail="No deadlines in queue")
@@ -167,7 +268,7 @@ async def get_next_deadline():
 
 @app.post("/api/dsa/deadlines/extract")
 async def extract_next_deadline():
-    """Remove and return the next (most urgent) deadline."""
+    """Remove and return the next deadline."""
     item = deadline_queue.extract_min()
     if not item:
         raise HTTPException(status_code=404, detail="No deadlines in queue")
@@ -176,167 +277,9 @@ async def extract_next_deadline():
 
 @app.delete("/api/dsa/deadlines")
 async def clear_deadlines():
-    """Clear all deadlines from the queue."""
     deadline_queue.clear()
     return {"message": "All deadlines cleared"}
 
-
-# ═══════════════════════════════════════════════════════════════════════
-#  CHRONOLOGICAL LOG ENDPOINTS (AVL Tree)
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.post("/api/dsa/logs/index")
-async def index_logs(batch: LogBatch):
-    """Insert log entries into the AVL tree indexed by timestamp."""
-    for entry in batch.entries:
-        log_tree.insert(entry.timestamp, entry.model_dump())
-    return {
-        "message": f"Indexed {len(batch.entries)} log(s)",
-        "tree_size": log_tree.size()
-    }
-
-
-@app.get("/api/dsa/logs/index")
-async def get_all_logs():
-    """Get all logs in chronological order."""
-    return {
-        "logs": log_tree.in_order(),
-        "count": log_tree.size()
-    }
-
-
-@app.post("/api/dsa/logs/range")
-async def query_logs_range(query: RangeQuery):
-    """Query logs within a timestamp range."""
-    results = log_tree.range_query(query.start, query.end)
-    return {
-        "logs": results,
-        "count": len(results),
-        "range": {"start": query.start, "end": query.end}
-    }
-
-
-@app.get("/api/dsa/logs/search/{timestamp}")
-async def search_log(timestamp: float):
-    """Search for a log by exact timestamp."""
-    result = log_tree.search(timestamp)
-    if result is None:
-        raise HTTPException(status_code=404, detail="No log found at this timestamp")
-    return {"log": result}
-
-
-@app.delete("/api/dsa/logs")
-async def clear_logs():
-    """Clear all logs from the AVL tree."""
-    log_tree.clear()
-    return {"message": "All logs cleared"}
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  MERKLE TREE ENDPOINTS (SHA-256 Verification)
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.post("/api/dsa/merkle/build")
-async def build_merkle_tree(request: MerkleBuildRequest):
-    """Build a Merkle tree from log content strings."""
-    if not request.logs:
-        raise HTTPException(status_code=400, detail="At least one log entry is required")
-
-    merkle_tree.build(request.logs)
-    return {
-        "message": f"Merkle tree built with {len(request.logs)} leaves",
-        "root_hash": merkle_tree.get_root(),
-        "leaf_count": merkle_tree.leaf_count,
-        "tree_levels": len(merkle_tree.get_tree_visualization())
-    }
-
-
-@app.post("/api/dsa/merkle/verify")
-async def verify_merkle_tree(request: MerkleVerifyRequest):
-    """Verify log integrity against the stored Merkle root."""
-    result = merkle_tree.verify(request.logs)
-    return result
-
-
-@app.get("/api/dsa/merkle/root")
-async def get_merkle_root():
-    """Get the current Merkle root hash."""
-    root = merkle_tree.get_root()
-    if not root:
-        raise HTTPException(status_code=404, detail="No Merkle tree built yet")
-    return {"root_hash": root, "leaf_count": merkle_tree.leaf_count}
-
-
-@app.get("/api/dsa/merkle/proof/{index}")
-async def get_merkle_proof(index: int):
-    """Get Merkle proof (audit path) for a leaf at the given index."""
-    if index < 0 or index >= merkle_tree.leaf_count:
-        raise HTTPException(status_code=400, detail=f"Index must be between 0 and {merkle_tree.leaf_count - 1}")
-    proof = merkle_tree.get_proof(index)
-    return {"index": index, "proof": proof}
-
-
-@app.get("/api/dsa/merkle/tree")
-async def get_merkle_tree_viz():
-    """Get the full Merkle tree structure for visualization."""
-    tree = merkle_tree.get_tree_visualization()
-    if not tree:
-        raise HTTPException(status_code=404, detail="No Merkle tree built yet")
-    return {"tree": tree, "levels": len(tree), "root": merkle_tree.get_root()}
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  SPRINT OPTIMIZER ENDPOINTS (0-1 Knapsack DP)
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.post("/api/dsa/sprint/optimize")
-async def optimize_sprint(request: SprintOptimizeRequest):
-    """Run 0-1 Knapsack DP to select optimal tasks for the sprint."""
-    tasks = [t.model_dump() for t in request.tasks]
-    result = KnapsackDP.solve(tasks, request.capacity)
-    return result
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  TRIE SEARCH ENDPOINTS (Autocomplete)
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.get("/api/dsa/search/autocomplete")
-async def autocomplete(prefix: str = "", limit: int = 10):
-    """Get autocomplete suggestions for a prefix."""
-    if not prefix:
-        return {"suggestions": [], "prefix": prefix}
-    results = search_trie.autocomplete(prefix, limit)
-    return {"suggestions": results, "prefix": prefix, "count": len(results)}
-
-
-@app.post("/api/dsa/search/insert")
-async def insert_terms(request: TrieInsertRequest):
-    """Insert terms into the trie."""
-    for term in request.terms:
-        search_trie.insert(term)
-    return {
-        "message": f"Inserted {len(request.terms)} term(s)",
-        "trie_size": search_trie.size()
-    }
-
-
-@app.get("/api/dsa/search/exists")
-async def search_exact(word: str = ""):
-    """Check if an exact word exists in the trie."""
-    return {"word": word, "exists": search_trie.search(word)}
-
-
-@app.delete("/api/dsa/search")
-async def clear_trie():
-    """Clear the trie and re-seed with sample terms."""
-    search_trie.clear()
-    for term in _sample_terms:
-        search_trie.insert(term)
-    return {"message": "Trie reset to sample terms", "size": search_trie.size()}
-
-
-# ─── Main ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn

@@ -6,19 +6,19 @@ import { dsaApi } from '../services/api';
 import { HiLightningBolt, HiPlus, HiTrash, HiCheckCircle, HiXCircle } from 'react-icons/hi';
 
 const SAMPLE_TASKS = [
-  { name: 'AVL Tree Rotations', weight: 6, value: 9 },
-  { name: 'Merkle Hash Verification', weight: 4, value: 8 },
-  { name: 'Trie Prefix Search', weight: 3, value: 7 },
-  { name: 'Heap Sort Implementation', weight: 5, value: 6 },
-  { name: 'Graph BFS/DFS', weight: 8, value: 10 },
-  { name: 'Dynamic Programming Memo', weight: 7, value: 9 },
-  { name: 'Red-Black Tree Insert', weight: 9, value: 8 },
-  { name: 'Dijkstra Shortest Path', weight: 5, value: 7 },
+  { name: 'BST Traversal Implementation', weight: 4, value: 8 },
+  { name: 'Stack & Queue Undo Engine', weight: 3, value: 7 },
+  { name: 'LinkedList Activity Feed', weight: 5, value: 9 },
+  { name: 'Priority Queue Deadlines', weight: 4, value: 8 },
+  { name: 'Heap Sort Implementation', weight: 6, value: 6 },
+  { name: 'AVL Tree Rotations (End-Sem)', weight: 8, value: 10 },
+  { name: 'Merkle Tree Integrity (End-Sem)', weight: 7, value: 9 },
 ];
 
 export default function SprintOptimizer() {
   const [tasks, setTasks] = useState(SAMPLE_TASKS);
-  const [capacity, setCapacity] = useState(30);
+  const [capacity, setCapacity] = useState(20);
+  const [algorithm, setAlgorithm] = useState('greedy'); // 'greedy' (Mid-Sem) or 'knapsack' (End-Sem)
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [newTask, setNewTask] = useState({ name: '', weight: '', value: '' });
@@ -26,18 +26,24 @@ export default function SprintOptimizer() {
   const handleOptimize = async () => {
     setLoading(true);
     try {
-      const { data } = await dsaApi.optimizeSprint(tasks, capacity);
-      setResult(data);
+      if (algorithm === 'greedy') {
+        const { data } = await dsaApi.sprintGreedy(tasks, capacity);
+        setResult(data);
+      } else {
+        const { data } = await dsaApi.optimizeSprint(tasks, capacity);
+        setResult(data);
+      }
     } catch (err) {
       console.error('Optimization failed:', err);
-      // Fallback: simple local calculation if Python backend is down
+      // Fallback local calculation
       setResult({
+        algorithm: algorithm === 'greedy' ? 'Mid-Sem FIFO Queue Scheduler' : 'End-Sem 0-1 Knapsack DP',
         selected_tasks: tasks.slice(0, 3),
         excluded_tasks: tasks.slice(3),
         total_value: 24,
-        total_weight: 13,
+        total_weight: 12,
         capacity,
-        utilization: 43.3,
+        utilization: 60.0,
       });
     } finally {
       setLoading(false);
@@ -65,13 +71,38 @@ export default function SprintOptimizer() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header & Algorithm Selection */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h3 className="text-lg font-semibold text-heading">Sprint Task Allocator</h3>
-          <p className="text-xs text-muted mt-0.5">0-1 Knapsack Dynamic Programming — maximize value within capacity</p>
+          <p className="text-xs text-muted mt-0.5">
+            Select task subset within sprint capacity (hours)
+          </p>
         </div>
-        <Badge variant="accent" icon="🎒">Knapsack DP</Badge>
+
+        {/* Algorithm Selector Switch */}
+        <div className="flex items-center bg-canvas p-1 rounded-xl border border-border">
+          <button
+            onClick={() => { setAlgorithm('greedy'); setResult(null); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              algorithm === 'greedy'
+                ? 'bg-accent text-white shadow-glow-sm'
+                : 'text-muted hover:text-heading'
+            }`}
+          >
+            🔹 Phase 1: Queue/Greedy (Mid-Sem)
+          </button>
+          <button
+            onClick={() => { setAlgorithm('knapsack'); setResult(null); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              algorithm === 'knapsack'
+                ? 'bg-accent text-white shadow-glow-sm'
+                : 'text-muted hover:text-heading'
+            }`}
+          >
+            🔸 Phase 2: Knapsack DP (End-Sem)
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -166,14 +197,14 @@ export default function SprintOptimizer() {
               <span className="text-accent font-bold text-lg">{capacity} hours</span>
             </div>
             <input
-              type="range" min="5" max="80" value={capacity}
+              type="range" min="5" max="50" value={capacity}
               onChange={(e) => { setCapacity(parseInt(e.target.value)); setResult(null); }}
               className="w-full accent-accent h-2 rounded-full cursor-pointer"
             />
             <div className="flex justify-between text-xs text-muted mt-1">
               <span>5h</span>
-              <span>40h (1 week)</span>
-              <span>80h (2 weeks)</span>
+              <span>25h (Light Sprint)</span>
+              <span>50h (Heavy Sprint)</span>
             </div>
           </Card>
 
@@ -183,7 +214,9 @@ export default function SprintOptimizer() {
             onClick={handleOptimize} loading={loading}
             icon={<HiLightningBolt />}
           >
-            Optimize Sprint — Knapsack DP
+            {algorithm === 'greedy'
+              ? 'Run Mid-Sem FIFO/Greedy Queue Allocator'
+              : 'Optimize Sprint — 0-1 Knapsack DP'}
           </Button>
         </div>
 
@@ -193,7 +226,10 @@ export default function SprintOptimizer() {
             <>
               {/* Summary */}
               <Card hover={false} padding="p-5" className="border-accent/30">
-                <h4 className="text-sm font-semibold text-heading mb-4">Optimization Results</h4>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-semibold text-heading">Schedule Results</h4>
+                  <Badge variant="accent">{result.algorithm || 'Allocation'}</Badge>
+                </div>
 
                 <div className="space-y-4">
                   {/* Utilization Ring */}
@@ -209,7 +245,7 @@ export default function SprintOptimizer() {
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
                         <span className="text-2xl font-bold text-heading">{result.utilization}%</span>
-                        <span className="text-[10px] text-muted">Utilization</span>
+                        <span className="text-[10px] text-muted">Capacity Used</span>
                       </div>
                     </div>
                   </div>
@@ -225,27 +261,13 @@ export default function SprintOptimizer() {
                       <p className="text-xl font-bold text-accent">{result.total_weight}/{result.capacity}h</p>
                     </div>
                   </div>
-
-                  {/* Hours Bar */}
-                  <div>
-                    <div className="flex justify-between text-xs text-muted mb-1">
-                      <span>Hours Allocation</span>
-                      <span>{result.total_weight} / {result.capacity}h</span>
-                    </div>
-                    <div className="h-3 bg-canvas rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-accent to-purple-500 rounded-full transition-all duration-700"
-                        style={{ width: `${result.utilization}%` }}
-                      />
-                    </div>
-                  </div>
                 </div>
               </Card>
 
               {/* Selected Tasks */}
               <Card hover={false} padding="p-4">
                 <h4 className="text-xs font-semibold text-success uppercase tracking-wider mb-3">
-                  ✓ Selected Tasks ({result.selected_tasks.length})
+                  ✓ Scheduled Tasks ({result.selected_tasks.length})
                 </h4>
                 <div className="space-y-2">
                   {result.selected_tasks.map((t, i) => (
@@ -264,7 +286,7 @@ export default function SprintOptimizer() {
               {result.excluded_tasks.length > 0 && (
                 <Card hover={false} padding="p-4">
                   <h4 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
-                    ✕ Excluded Tasks ({result.excluded_tasks.length})
+                    ✕ Backlogged Tasks ({result.excluded_tasks.length})
                   </h4>
                   <div className="space-y-2">
                     {result.excluded_tasks.map((t, i) => (
@@ -281,17 +303,13 @@ export default function SprintOptimizer() {
               )}
             </>
           ) : (
-            <Card hover={false} padding="p-8" className="text-center">
-              <div className="text-5xl mb-4">🎯</div>
-              <h4 className="text-heading font-semibold">Ready to Optimize</h4>
-              <p className="text-muted text-sm mt-2">
-                Add tasks with hours and priority scores, set your sprint capacity, then hit Optimize.
-              </p>
-              <p className="text-[10px] text-muted mt-3 font-mono">
-                Algorithm: 0-1 Knapsack Dynamic Programming
-              </p>
-              <p className="text-[10px] text-muted font-mono">
-                Time: O(n × capacity) · Space: O(n × capacity)
+            <Card hover={false} padding="p-8" className="text-center space-y-3">
+              <div className="text-5xl">⚡</div>
+              <h4 className="text-heading font-semibold">Ready to Schedule</h4>
+              <p className="text-muted text-xs leading-relaxed">
+                {algorithm === 'greedy'
+                  ? 'Phase 1 (Mid-Sem): Uses a lightweight FIFO Queue sorted by priority ratio.'
+                  : 'Phase 2 (End-Sem): Solves 0-1 Knapsack DP using a 2D matrix.'}
               </p>
             </Card>
           )}

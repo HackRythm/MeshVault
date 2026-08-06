@@ -79,35 +79,41 @@ export const logApi = {
 // ─── DSA Engine API (Python FastAPI) ─────────────────────────────────
 
 export const dsaApi = {
-  // Deadlines (MinHeap)
+  // Phase & Architecture Info
+  getPhaseInfo: () => pythonApi.get('/dsa/phase-info'),
+
+  // Phase 1: Mid-Sem Light DSAs
+  stackPush: (action, details) => pythonApi.post('/dsa/midsem/stack/push', { action, details }),
+  stackPop: () => pythonApi.post('/dsa/midsem/stack/pop'),
+  stackGet: () => pythonApi.get('/dsa/midsem/stack'),
+  
+  queueEnqueue: (items) => pythonApi.post('/dsa/midsem/queue/enqueue', { items }),
+  queueGet: () => pythonApi.get('/dsa/midsem/queue'),
+  sprintGreedy: (tasks, capacity) => pythonApi.post('/dsa/midsem/sprint/greedy', { tasks, capacity }),
+
+  linkedListAppend: (log) => pythonApi.post('/dsa/midsem/linkedlist/append', log),
+  linkedListGet: (reverse = false) => pythonApi.get('/dsa/midsem/linkedlist', { params: { reverse } }),
+
+  bstIndexLogs: (entries) => pythonApi.post('/dsa/midsem/bst/index', { entries }),
+  bstGetLogs: () => pythonApi.get('/dsa/midsem/bst'),
+  bstQueryRange: (start, end) => pythonApi.post('/dsa/midsem/bst/range', { start, end }),
+
+  // Deadlines (MinHeap Priority Queue)
   addDeadlines: (items) => pythonApi.post('/dsa/deadlines', { items }),
   getDeadlines: () => pythonApi.get('/dsa/deadlines'),
   getNextDeadline: () => pythonApi.get('/dsa/deadlines/next'),
   extractNextDeadline: () => pythonApi.post('/dsa/deadlines/extract'),
   clearDeadlines: () => pythonApi.delete('/dsa/deadlines'),
 
-  // Logs (AVL Tree)
+  // Phase 2: End-Sem Advanced DSAs (Roadmap Preview)
   indexLogs: (entries) => pythonApi.post('/dsa/logs/index', { entries }),
   getIndexedLogs: () => pythonApi.get('/dsa/logs/index'),
   queryLogRange: (start, end) => pythonApi.post('/dsa/logs/range', { start, end }),
-  searchLog: (timestamp) => pythonApi.get(`/dsa/logs/search/${timestamp}`),
-  clearIndexedLogs: () => pythonApi.delete('/dsa/logs'),
 
-  // Merkle Tree (SHA-256)
   buildMerkle: (logs) => pythonApi.post('/dsa/merkle/build', { logs }),
   verifyMerkle: (logs) => pythonApi.post('/dsa/merkle/verify', { logs }),
-  getMerkleRoot: () => pythonApi.get('/dsa/merkle/root'),
-  getMerkleProof: (index) => pythonApi.get(`/dsa/merkle/proof/${index}`),
-  getMerkleTree: () => pythonApi.get('/dsa/merkle/tree'),
 
-  // Sprint Optimizer (Knapsack DP)
-  optimizeSprint: (tasks, capacity) =>
-    pythonApi.post('/dsa/sprint/optimize', { tasks, capacity }),
+  optimizeSprint: (tasks, capacity) => pythonApi.post('/dsa/sprint/optimize', { tasks, capacity }),
 
-  // Autocomplete (Trie)
-  autocomplete: (prefix, limit = 10) =>
-    pythonApi.get('/dsa/search/autocomplete', { params: { prefix, limit } }),
-  insertTerms: (terms) => pythonApi.post('/dsa/search/insert', { terms }),
-  searchExact: (word) => pythonApi.get('/dsa/search/exists', { params: { word } }),
-  clearTrie: () => pythonApi.delete('/dsa/search'),
+  autocomplete: (prefix, limit = 10) => pythonApi.get('/dsa/search/autocomplete', { params: { prefix, limit } }),
 };
