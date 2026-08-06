@@ -3,7 +3,7 @@ import axios from 'axios';
 // ─── Node.js Gateway (Auth, CRUD, MongoDB) ───────────────────────────
 
 export const nodeApi = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_NODE_API_URL || 'http://localhost:5000/api',
   headers: { 'Content-Type': 'application/json' },
   timeout: 10000,
 });
@@ -11,7 +11,7 @@ export const nodeApi = axios.create({
 // Attach JWT token to every request
 nodeApi.interceptors.request.use((config) => {
   const token = localStorage.getItem('meshvault_token');
-  if (token) {
+  if (token && !token.startsWith('demo-token')) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -33,7 +33,7 @@ nodeApi.interceptors.response.use(
 // ─── Python FastAPI (DSA Engine) ─────────────────────────────────────
 
 export const pythonApi = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000/api',
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000, // DSA operations may take longer
 });
@@ -105,15 +105,17 @@ export const dsaApi = {
   extractNextDeadline: () => pythonApi.post('/dsa/deadlines/extract'),
   clearDeadlines: () => pythonApi.delete('/dsa/deadlines'),
 
-  // Phase 2: End-Sem Advanced DSAs (Roadmap Preview)
+  // Phase 2: End-Sem Advanced DSAs
   indexLogs: (entries) => pythonApi.post('/dsa/logs/index', { entries }),
   getIndexedLogs: () => pythonApi.get('/dsa/logs/index'),
   queryLogRange: (start, end) => pythonApi.post('/dsa/logs/range', { start, end }),
 
   buildMerkle: (logs) => pythonApi.post('/dsa/merkle/build', { logs }),
   verifyMerkle: (logs) => pythonApi.post('/dsa/merkle/verify', { logs }),
+  getMerkleTree: () => pythonApi.get('/dsa/merkle/tree'),
 
   optimizeSprint: (tasks, capacity) => pythonApi.post('/dsa/sprint/optimize', { tasks, capacity }),
 
   autocomplete: (prefix, limit = 10) => pythonApi.get('/dsa/search/autocomplete', { params: { prefix, limit } }),
+  insertTerms: (terms) => pythonApi.post('/dsa/search/insert', { terms }),
 };

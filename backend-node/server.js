@@ -20,9 +20,23 @@ const app = express();
 
 // ─── Middleware ───────────────────────────────────────────────────────
 
-// CORS — allow React frontend
+// CORS — allow React frontend and local dev origins
+const allowedOrigins = [
+  process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, Postman) or matched dev origins
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Permissive in development
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']

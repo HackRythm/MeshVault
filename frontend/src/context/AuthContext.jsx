@@ -9,17 +9,39 @@ export function AuthProvider({ children }) {
 
   // Check for existing session on mount
   useEffect(() => {
-    const token = localStorage.getItem('meshvault_token');
-    const savedUser = localStorage.getItem('meshvault_user');
-    if (token && savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch {
-        localStorage.removeItem('meshvault_token');
-        localStorage.removeItem('meshvault_user');
+    const initAuth = async () => {
+      const token = localStorage.getItem('meshvault_token');
+      const savedUser = localStorage.getItem('meshvault_user');
+      if (token && savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser);
+          setUser(parsed);
+          // If token is real (not demo), attempt silent background validation
+          if (!token.startsWith('demo-token')) {
+            try {
+              const { data } = await authApi.getMe();
+              if (data?.user) {
+                setUser(data.user);
+                localStorage.setItem('meshvault_user', JSON.stringify(data.user));
+              }
+            } catch (err) {
+              if (err.response?.status === 401) {
+                localStorage.removeItem('meshvault_token');
+                localStorage.removeItem('meshvault_user');
+                setUser(null);
+              }
+            }
+          }
+        } catch {
+          localStorage.removeItem('meshvault_token');
+          localStorage.removeItem('meshvault_user');
+          setUser(null);
+        }
       }
-    }
-    setLoading(false);
+      setLoading(false);
+    };
+
+    initAuth();
   }, []);
 
   const login = async (email, password) => {
