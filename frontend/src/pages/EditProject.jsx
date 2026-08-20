@@ -71,6 +71,23 @@ export default function EditProject() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`Are you sure you want to delete project ${projectId}? This action cannot be undone.`)) {
+      return;
+    }
+
+    setError('');
+    setSubmitting(true);
+
+    try {
+      await projectService.deleteProject(projectId);
+      navigate('/projects');
+    } catch (err) {
+      setError(err.message || 'Failed to delete project.');
+      setSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <AppLayout title="Edit Project">
@@ -169,11 +186,21 @@ export default function EditProject() {
             />
           </div>
 
-          <div className="flex gap-16" style={{ marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+          <div className="flex gap-16" style={{ marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '20px', alignItems: 'center' }}>
             <button type="submit" className="btn btn--primary" disabled={submitting}>
               {submitting ? 'Saving modifications...' : '✓ Save Modifications'}
             </button>
             <Link to={`/projects/${projectId}`} className="btn btn--secondary">Cancel</Link>
+            
+            <button 
+              type="button" 
+              onClick={handleDelete} 
+              className="btn btn--danger" 
+              disabled={submitting}
+              style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              🗑️ Delete Project
+            </button>
           </div>
 
         </form>

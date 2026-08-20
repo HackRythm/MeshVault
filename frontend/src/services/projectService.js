@@ -22,6 +22,10 @@ const projectService = {
     return api.put(`/api/projects/${projectId}`, data);
   },
 
+  async deleteProject(projectId) {
+    return api.delete(`/api/projects/${projectId}`);
+  },
+
   async addMilestone(projectId, data) {
     return api.post(`/api/projects/${projectId}/milestones`, data);
   },

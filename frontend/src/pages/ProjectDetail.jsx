@@ -144,7 +144,7 @@ export default function ProjectDetail() {
           </p>
         </div>
         <div className="flex gap-12">
-          {user.role === 'STAFF' && (
+          {(user.role === 'STAFF' || user.role === 'STUDENT') && (
             <Link to={`/projects/${project.project_id}/edit`} className="btn btn--secondary">
               ✏️ Edit Project
             </Link>
