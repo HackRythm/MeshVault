@@ -64,7 +64,16 @@ export default function Workspace() {
   if (workspaces.length === 0) {
     return (
       <AppLayout title="Workspace">
-        <EmptyState icon="📂" title="No workspaces assigned" text="You do not have access to any workspaces at the moment." />
+        <div className="page-header">
+          <div className="page-header__left">
+            <h1 className="page-header__title">Workspace</h1>
+            <p className="page-header__subtitle">No active workspaces assigned.</p>
+          </div>
+          <Link to="/workspace/new" className="btn btn--secondary">
+            ➕ New Workspace
+          </Link>
+        </div>
+        <EmptyState icon="📂" title="No workspaces assigned" text="You do not have access to any workspaces at the moment. Create a new one to get started." />
       </AppLayout>
     );
   }
@@ -97,11 +106,16 @@ export default function Workspace() {
             </>
           )}
         </div>
-        {user.role === 'STAFF' && selectedWs && (
-          <Link to={`/projects/new?workspace_id=${selectedWs.id}`} className="btn btn--primary">
-            ➕ New Project
+        <div className="flex gap-12">
+          {selectedWs && (
+            <Link to={`/projects/new?workspace_id=${selectedWs.id}`} className="btn btn--primary">
+              ➕ New Project
+            </Link>
+          )}
+          <Link to="/workspace/new" className="btn btn--secondary">
+            ➕ New Workspace
           </Link>
-        )}
+        </div>
       </div>
 
       {error && <div className="login-card__error mb-24">{error}</div>}

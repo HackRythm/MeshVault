@@ -14,6 +14,10 @@ const workspaceService = {
     if (role)   p.append('role', role);
     return api.get(`/api/workspaces/${id}?${p}`);
   },
+
+  async createWorkspace(userId, data) {
+    return api.post(`/api/workspaces?user_id=${userId}`, data);
+  },
 };
 
 export default workspaceService;

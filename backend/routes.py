@@ -13,7 +13,7 @@ from database import get_db
 from models import (
     User, Workspace, Group, GroupMembership, Project, Milestone, Activity, ReviewRequest,
 )
-from schemas import LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate
+from schemas import LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate
 from auth import authenticate_user
 
 router = APIRouter(prefix="/api")
@@ -84,6 +84,32 @@ def list_workspaces(
             "student_count": student_count,
         })
     return result
+
+
+@router.post("/workspaces", status_code=201)
+def create_workspace(body: WorkspaceCreate, user_id: int, db: Session = Depends(get_db)):
+    """Create a new academic workspace."""
+    ws = Workspace(
+        name=body.name,
+        course_code=body.course_code,
+        course_name=body.course_name,
+        academic_year=body.academic_year,
+        description=body.description,
+        created_by=user_id,
+    )
+    db.add(ws)
+    db.commit()
+    db.refresh(ws)
+    return {
+        "id": ws.id,
+        "name": ws.name,
+        "course_code": ws.course_code,
+        "course_name": ws.course_name,
+        "academic_year": ws.academic_year,
+        "description": ws.description,
+        "created_by": ws.created_by,
+        "created_at": str(ws.created_at),
+    }
 
 
 @router.get("/workspaces/{workspace_id}")

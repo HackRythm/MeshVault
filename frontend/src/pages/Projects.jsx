@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import AppLayout from '../layouts/AppLayout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
@@ -43,6 +44,9 @@ export default function Projects() {
             {user.role === 'STAFF' ? 'Review all projects registered across workspaces.' : 'Your team projects list.'}
           </p>
         </div>
+        <Link to="/projects/new" className="btn btn--primary">
+          ➕ New Project
+        </Link>
       </div>
 
       {error && <div className="login-card__error mb-24">{error}</div>}

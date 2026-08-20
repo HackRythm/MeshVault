@@ -12,6 +12,7 @@ import Projects from './pages/Projects';
 import ProjectDetail from './pages/ProjectDetail';
 import CreateProject from './pages/CreateProject';
 import EditProject from './pages/EditProject';
+import CreateWorkspace from './pages/CreateWorkspace';
 import SmartSearch from './pages/SmartSearch';
 import Profile from './pages/Profile';
 import Building from './pages/Building';
@@ -36,6 +37,7 @@ export default function App() {
       {/* Protected Routes */}
       <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
       <Route path="/workspace" element={<PrivateRoute><Workspace /></PrivateRoute>} />
+      <Route path="/workspace/new" element={<PrivateRoute><CreateWorkspace /></PrivateRoute>} />
       <Route path="/groups" element={<PrivateRoute><Groups /></PrivateRoute>} />
       <Route path="/groups/:id" element={<PrivateRoute><GroupDetail /></PrivateRoute>} />
       <Route path="/projects" element={<PrivateRoute><Projects /></PrivateRoute>} />
