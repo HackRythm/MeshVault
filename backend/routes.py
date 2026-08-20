@@ -496,6 +496,22 @@ def get_dashboard(
             "created_at": str(a.created_at),
         })
 
+    group_members = []
+    if role == "STUDENT" and user_id:
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+        gids = [m.group_id for m in mems]
+        if gids:
+            all_mems = db.query(GroupMembership).filter(GroupMembership.group_id.in_(gids)).all()
+            member_ids = {m.user_id for m in all_mems}
+            db_members = db.query(User).filter(User.id.in_(member_ids)).all()
+            for u in db_members:
+                group_members.append({
+                    "id": u.id,
+                    "name": u.name,
+                    "email": u.email,
+                    "user_id": u.user_id
+                })
+
     return {
         "total_groups": total_groups,
         "total_students": total_students,
@@ -504,7 +520,46 @@ def get_dashboard(
         "completed_projects": completed_projects,
         "upcoming_deadlines": upcoming,
         "recent_activity": activity_list,
+        "group_members": group_members,
     }
+
+
+@router.get("/activities")
+def list_activities(
+    user_id: Optional[int] = None,
+    role: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Retrieve full audit activities — role-aware scoping."""
+    if role == "STUDENT" and user_id:
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+        gids = [m.group_id for m in mems]
+        projects = db.query(Project).filter(Project.group_id.in_(gids)).all() if gids else []
+        pids = [p.id for p in projects]
+        recent = (
+            db.query(Activity)
+            .filter(Activity.project_id.in_(pids))
+            .order_by(Activity.created_at.desc())
+            .all()
+        )
+    else:
+        recent = db.query(Activity).order_by(Activity.created_at.desc()).all()
+
+    activity_list = []
+    for a in recent:
+        u = db.query(User).filter(User.id == a.user_id).first()
+        pr = db.query(Project).filter(Project.id == a.project_id).first()
+        activity_list.append({
+            "id": a.id,
+            "user_name": u.name if u else "Unknown",
+            "project_name": pr.name if pr else "Unknown",
+            "project_id": pr.project_id if pr else "",
+            "activity_type": a.activity_type,
+            "message": a.message,
+            "created_at": str(a.created_at),
+        })
+    return activity_list
+
 
 
 # ─── Smart Search ────────────────────────────────────────────────────────────

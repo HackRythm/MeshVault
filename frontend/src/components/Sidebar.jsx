@@ -17,11 +17,8 @@ export default function Sidebar() {
     { path: '/priority-engine', label: 'Priority Engine', icon: '⚡' },
     { path: '/progress-analytics', label: 'Progress Analytics', icon: '📈' },
     { path: '/sprint-optimizer', label: 'Sprint Optimizer', icon: '⏱️' },
-    {
-      path: '/audit-trail',
-      label: user && user.role === 'STAFF' ? 'Review Queue' : 'Audit Trail',
-      icon: '📜'
-    },
+    ...(user && user.role === 'STAFF' ? [{ path: '/review-queue', label: 'Review Queue', icon: '📋' }] : []),
+    { path: '/audit-trail', label: 'Audit Trail', icon: '📜' },
     { path: '/algorithm-lab', label: 'Algorithm Lab', icon: '🧪' },
   ];
 

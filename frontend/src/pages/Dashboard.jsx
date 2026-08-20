@@ -129,34 +129,57 @@ export default function Dashboard() {
         </div>
 
         {/* Recent Activity */}
-        <div className="card card--flat">
-          <h3 className="card__title" style={{ fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>🔔</span> Recent Activities
-          </h3>
-          {stats?.recent_activity?.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {stats.recent_activity.map((act) => (
-                <div key={act.id} className="activity-item">
-                  <div className="activity-item__dot" />
-                  <div className="activity-item__content">
-                    <p className="activity-item__message">
-                      <strong>{act.user_name}</strong> {act.message.replace(/'[^']+'/g, '').replace('Project  was', 'project')}
-                      {act.project_id && (
-                        <span>
-                          {' '}for{' '}
-                          <Link to={`/projects/${act.project_id}`} style={{ fontWeight: '500' }}>
-                            {act.project_id}
-                          </Link>
-                        </span>
-                      )}
-                    </p>
-                    <span className="activity-item__meta">{new Date(act.created_at).toLocaleString()}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="card card--flat">
+            <h3 className="card__title" style={{ fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>🔔</span> Recent Activities
+            </h3>
+            {stats?.recent_activity?.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {stats.recent_activity.map((act) => (
+                  <div key={act.id} className="activity-item">
+                    <div className="activity-item__dot" />
+                    <div className="activity-item__content">
+                      <p className="activity-item__message">
+                        <strong>{act.user_name}</strong> {act.message.replace(/'[^']+'/g, '').replace('Project  was', 'project')}
+                        {act.project_id && (
+                          <span>
+                            {' '}for{' '}
+                            <Link to={`/projects/${act.project_id}`} style={{ fontWeight: '500' }}>
+                              {act.project_id}
+                            </Link>
+                          </span>
+                        )}
+                      </p>
+                      <span className="activity-item__meta">{new Date(act.created_at).toLocaleString()}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon="🔔" title="No activity recorded" text="No actions have been registered for this workspace yet." />
+            )}
+          </div>
+
+          {user.role === 'STUDENT' && stats?.group_members?.length > 0 && (
+            <div className="card card--flat">
+              <h3 className="card__title" style={{ fontSize: '16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>👥</span> My Group Members
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {stats.group_members.map(member => (
+                  <div key={member.id} className="member-chip" style={{ margin: 0, display: 'flex', width: '100%' }}>
+                    <div className="member-chip__avatar">
+                      {member.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: '500' }}>{member.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{member.user_id} {member.id === user.id ? '(You)' : ''}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          ) : (
-            <EmptyState icon="🔔" title="No activity recorded" text="No actions have been registered for this workspace yet." />
           )}
         </div>
       </div>

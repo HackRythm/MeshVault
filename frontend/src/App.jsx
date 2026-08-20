@@ -17,6 +17,7 @@ import Profile from './pages/Profile';
 import Building from './pages/Building';
 import ProgressAnalytics from './pages/ProgressAnalytics';
 import ReviewQueue from './pages/ReviewQueue';
+import AuditTrail from './pages/AuditTrail';
 
 // Protected Route Wrapper
 function PrivateRoute({ children }) {
@@ -48,11 +49,12 @@ export default function App() {
       <Route path="/priority-engine" element={<PrivateRoute><Building title="Priority Engine" /></PrivateRoute>} />
       <Route path="/progress-analytics" element={<PrivateRoute><ProgressAnalytics /></PrivateRoute>} />
       <Route path="/sprint-optimizer" element={<PrivateRoute><Building title="Sprint Optimizer" /></PrivateRoute>} />
-      <Route path="/audit-trail" element={
+      <Route path="/review-queue" element={
         <PrivateRoute>
-          {user && user.role === 'STAFF' ? <ReviewQueue /> : <Building title="Audit Trail" />}
+          {user && user.role === 'STAFF' ? <ReviewQueue /> : <Navigate to="/dashboard" replace />}
         </PrivateRoute>
       } />
+      <Route path="/audit-trail" element={<PrivateRoute><AuditTrail /></PrivateRoute>} />
       <Route path="/algorithm-lab" element={<PrivateRoute><Building title="Algorithm Lab" /></PrivateRoute>} />
 
       {/* Redirect fallbacks */}
