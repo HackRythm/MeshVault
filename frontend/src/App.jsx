@@ -56,6 +56,7 @@ export default function App() {
       } />
       <Route path="/audit-trail" element={<PrivateRoute><AuditTrail /></PrivateRoute>} />
       <Route path="/algorithm-lab" element={<PrivateRoute><Building title="Algorithm Lab" /></PrivateRoute>} />
+      <Route path="/github" element={<PrivateRoute><Building title="GitHub Sync Engine" /></PrivateRoute>} />
 
       {/* Redirect fallbacks */}
       <Route path="/" element={<Navigate to="/dashboard" replace />} />

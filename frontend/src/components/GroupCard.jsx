@@ -10,7 +10,9 @@ export default function GroupCard({ group }) {
             {group.name}
           </Link>
         </h3>
-        <span className="badge badge--info">{group.member_count || 0} Members</span>
+        <Link to={`/groups/${group.id}`} className="badge badge--info" style={{ textDecoration: 'none' }}>
+          {group.member_count || 0} Members
+        </Link>
       </div>
       <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', height: '40px', overflow: 'hidden' }}>
         {group.description || 'No group description.'}

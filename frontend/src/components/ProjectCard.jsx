@@ -48,7 +48,7 @@ export default function ProjectCard({ project }) {
 
       {project.group_name && (
         <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', justifyContent: 'space-between' }}>
-          <span>Group: <strong>{project.group_name}</strong></span>
+          <span>Group: <Link to={`/groups/${project.group_id}`} style={{ fontWeight: '600', color: 'var(--text-primary)', textDecoration: 'none' }}>{project.group_name}</Link></span>
           {project.course && <span>{project.course}</span>}
         </div>
       )}

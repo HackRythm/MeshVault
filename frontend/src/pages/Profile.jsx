@@ -44,6 +44,19 @@ export default function Profile() {
           </div>
         </div>
 
+        {user.role === 'STUDENT' && (
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: '20px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: '600', marginBottom: '12px', color: 'var(--text-accent)' }}>🐙 GitHub Integration</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.01)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <div>
+                <div style={{ fontWeight: '500', fontSize: '13px' }}>GitHub Sync Status</div>
+                <div style={{ fontSize: '11px', color: 'var(--clr-warning)' }}>⚠️ Feature Building (Target: End Sem Evaluation)</div>
+              </div>
+              <button className="btn btn--secondary btn--sm" disabled style={{ opacity: 0.6 }}>Connect</button>
+            </div>
+          </div>
+        )}
+
         <button onClick={logout} className="btn btn--danger" style={{ width: '100%', justifyContent: 'center', marginTop: '12px' }}>
           🚪 Sign Out of Session
         </button>

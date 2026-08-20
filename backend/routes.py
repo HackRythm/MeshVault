@@ -459,6 +459,7 @@ def get_dashboard(
                 "project_id": p.project_id,
                 "name": p.name,
                 "deadline": str(p.deadline),
+                "group_id": p.group_id,
                 "group_name": (db.query(Group).filter(Group.id == p.group_id).first() or Group(name="")).name,
                 "status": p.status,
                 "progress": p.progress,

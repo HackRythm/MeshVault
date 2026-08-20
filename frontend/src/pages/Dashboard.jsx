@@ -108,7 +108,11 @@ export default function Dashboard() {
                         </Link>
                       </td>
                       <td>{p.name}</td>
-                      <td>{p.group_name}</td>
+                      <td>
+                        <Link to={`/groups/${p.group_id}`} style={{ fontWeight: '500' }}>
+                          {p.group_name}
+                        </Link>
+                      </td>
                       <td>{new Date(p.deadline).toLocaleDateString()}</td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

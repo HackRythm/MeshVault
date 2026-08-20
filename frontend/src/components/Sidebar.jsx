@@ -20,6 +20,7 @@ export default function Sidebar() {
     ...(user && user.role === 'STAFF' ? [{ path: '/review-queue', label: 'Review Queue', icon: '📋' }] : []),
     { path: '/audit-trail', label: 'Audit Trail', icon: '📜' },
     { path: '/algorithm-lab', label: 'Algorithm Lab', icon: '🧪' },
+    ...(user && user.role === 'STUDENT' ? [{ path: '/github', label: 'GitHub Sync', icon: '🐙' }] : []),
   ];
 
   return (
