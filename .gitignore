@@ -27,6 +27,10 @@ __pycache__/
 .venv/
 venv/
 
+# Database files
+*.db
+*.sqlite3
+
 # Logs & OS
 *.log
 .DS_Store

@@ -1,86 +1,91 @@
-import { HiViewGrid, HiCollection, HiLightningBolt, HiShieldCheck, HiLogout } from 'react-icons/hi';
+import React from 'react';
+import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const navItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: <HiViewGrid /> },
-  { id: 'projects', label: 'Project Hub', icon: <HiCollection /> },
-  { id: 'sprint', label: 'Sprint Optimizer', icon: <HiLightningBolt /> },
-  { id: 'audit', label: 'Audit Trail', icon: <HiShieldCheck /> },
-];
+export default function Sidebar() {
+  const { user, logout } = useAuth();
 
-export default function Sidebar({ activeView, onNavigate }) {
-  const { logout, user } = useAuth();
+  const navItems = [
+    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
+    { path: '/workspace', label: 'Workspace', icon: '📂' },
+    { path: '/groups', label: 'Groups', icon: '👥' },
+    { path: '/projects', label: 'Projects', icon: '📁' },
+    { path: '/search', label: 'Smart Search', icon: '🔍' },
+  ];
+
+  const buildingItems = [
+    { path: '/priority-engine', label: 'Priority Engine', icon: '⚡' },
+    { path: '/progress-analytics', label: 'Progress Analytics', icon: '📈' },
+    { path: '/sprint-optimizer', label: 'Sprint Optimizer', icon: '⏱️' },
+    {
+      path: '/audit-trail',
+      label: user && user.role === 'STAFF' ? 'Review Queue' : 'Audit Trail',
+      icon: '📜'
+    },
+    { path: '/algorithm-lab', label: 'Algorithm Lab', icon: '🧪' },
+  ];
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-surface border-r border-border flex flex-col z-40">
-      {/* Logo */}
-      <div className="px-6 py-5 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl accent-gradient flex items-center justify-center">
-            <span className="text-white font-bold text-sm">MV</span>
-          </div>
-          <div>
-            <h1 className="text-heading font-bold text-base tracking-tight">MeshVault</h1>
-            <p className="text-muted text-[10px] uppercase tracking-widest">Academic Tracker</p>
-          </div>
-        </div>
+    <aside className="sidebar">
+      <div className="sidebar__brand">
+        <div className="sidebar__logo">MV</div>
+        <h1 className="sidebar__title">MeshVault</h1>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        <p className="px-4 pb-2 text-[10px] uppercase tracking-widest text-muted font-medium">Navigation</p>
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onNavigate(item.id)}
-            className={`
-              w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium
-              transition-all duration-200
-              ${activeView === item.id
-                ? 'bg-accent/10 text-accent border-l-2 border-accent pl-[14px]'
-                : 'text-muted hover:bg-surface-hover hover:text-body'
-              }
-            `}
-          >
-            <span className="text-lg">{item.icon}</span>
-            {item.label}
-          </button>
-        ))}
+      <nav style={{ flex: 1 }}>
+        <div className="sidebar__section-label">Core Modules</div>
+        <ul className="sidebar__nav">
+          {navItems.map((item) => (
+            <li key={item.path}>
+              <NavLink
+                to={item.path}
+                className={({ isActive }) =>
+                  `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
+                }
+              >
+                <span className="sidebar__icon">{item.icon}</span>
+                <span>{item.label}</span>
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+
+        <div className="sidebar__section-label">DSA Engines</div>
+        <ul className="sidebar__nav">
+          {buildingItems.map((item) => (
+            <li key={item.path}>
+              <NavLink
+                to={item.path}
+                className={({ isActive }) =>
+                  `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
+                }
+              >
+                <span className="sidebar__icon">{item.icon}</span>
+                <span>{item.label}</span>
+              </NavLink>
+            </li>
+          ))}
+        </ul>
       </nav>
 
-      {/* DSA Engine Status */}
-      <div className="px-4 pb-3">
-        <div className="bg-canvas rounded-xl p-3 border border-border">
-          <p className="text-[10px] uppercase tracking-widest text-muted font-medium mb-2">DSA Engines</p>
-          <div className="space-y-1.5">
-            {['MinHeap PQ', 'AVL Tree', 'Merkle SHA-256', 'Knapsack DP', 'Trie Search'].map((engine) => (
-              <div key={engine} className="flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse-soft" />
-                <span className="text-xs text-body">{engine}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* User & Logout */}
-      <div className="px-3 pb-4 border-t border-border pt-3">
-        <div className="flex items-center gap-3 px-3">
-          <div className="w-8 h-8 rounded-full bg-accent/20 flex items-center justify-center">
-            <span className="text-accent text-sm font-semibold">
-              {user?.name?.charAt(0)?.toUpperCase() || '?'}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-heading truncate">{user?.name || 'User'}</p>
-            <p className="text-xs text-muted truncate">{user?.email || ''}</p>
-          </div>
+      <div className="sidebar__bottom">
+        <div className="sidebar__nav">
+          <NavLink
+            to="/profile"
+            className={({ isActive }) =>
+              `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
+            }
+          >
+            <span className="sidebar__icon">👤</span>
+            <span>Profile</span>
+          </NavLink>
           <button
             onClick={logout}
-            className="p-2 text-muted hover:text-alert rounded-lg hover:bg-alert/10 transition-colors"
-            title="Logout"
+            className="sidebar__link"
+            style={{ width: '100%', background: 'none', border: 'none', textAlign: 'left' }}
           >
-            <HiLogout className="text-lg" />
+            <span className="sidebar__icon">🚪</span>
+            <span>Logout</span>
           </button>
         </div>
       </div>

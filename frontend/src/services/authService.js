@@ -1,0 +1,37 @@
+import api from './api';
+
+const SESSION_KEY = 'meshvault_session';
+
+const authService = {
+  async login(email, password) {
+    const res = await api.post('/api/auth/login', { email, password });
+    if (res.success && res.user) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(res.user));
+    }
+    return res;
+  },
+
+  logout() {
+    localStorage.removeItem(SESSION_KEY);
+  },
+
+  getCurrentUser() {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  },
+
+  isAuthenticated() {
+    return !!this.getCurrentUser();
+  },
+
+  getRole() {
+    const user = this.getCurrentUser();
+    return user ? user.role : null;
+  },
+};
+
+export default authService;
