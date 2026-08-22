@@ -1497,12 +1497,40 @@ def get_dashboard(
         all_projects = (
             db.query(Project).filter(Project.group_id.in_(gids)).all() if gids else []
         )
-        projects = [p for p in all_projects if has_project_access(p, current_user, db)]
+        # Students see only their own group's projects
+        projects = all_projects
     else:
-        total_groups = db.query(Group).count()
-        total_students = db.query(User).filter(User.role == "STUDENT").count()
-        all_projects = db.query(Project).all()
-        projects = [p for p in all_projects if has_project_access(p, current_user, db)]
+        # STAFF: dashboard shows ALL projects as a global overview.
+        # Workspace isolation is enforced at the evaluation/comment level, not here.
+        my_workspaces = db.query(Workspace).filter(Workspace.created_by == current_user.id).all()
+        my_ws_ids = [ws.id for ws in my_workspaces]
+        if my_ws_ids:
+            # Projects in this staff member's workspaces (any status)
+            wp_project_ids = [
+                wp.project_id for wp in db.query(WorkspaceProject)
+                .filter(WorkspaceProject.workspace_id.in_(my_ws_ids)).all()
+            ]
+            if wp_project_ids:
+                projects = db.query(Project).filter(Project.id.in_(wp_project_ids)).all()
+            else:
+                projects = []
+        else:
+            # Staff with no workspaces yet: show all projects as global view
+            projects = db.query(Project).all()
+
+        # Groups and students from staff's workspaces
+        if my_ws_ids:
+            wg_group_ids = list(set(
+                wg.group_id for wg in db.query(WorkspaceGroup)
+                .filter(WorkspaceGroup.workspace_id.in_(my_ws_ids)).all()
+            ))
+            total_groups = len(wg_group_ids)
+            total_students = 0
+            for gid in wg_group_ids:
+                total_students += db.query(GroupMembership).filter(GroupMembership.group_id == gid).count()
+        else:
+            total_groups = db.query(Group).count()
+            total_students = db.query(User).filter(User.role == "STUDENT").count()
 
     total_projects = len(projects)
     active_projects = sum(1 for p in projects if p.status == "IN_PROGRESS")
@@ -1538,14 +1566,18 @@ def get_dashboard(
             .all()
         )
     else:
-        recent_all = db.query(Activity).order_by(Activity.created_at.desc()).all()
-        recent = []
-        for a in recent_all:
-            pr = db.query(Project).filter(Project.id == a.project_id).first()
-            if pr and has_project_access(pr, current_user, db):
-                recent.append(a)
-                if len(recent) >= 10:
-                    break
+        # STAFF: show activity for their workspace projects
+        pids = [p.id for p in projects]
+        if pids:
+            recent = (
+                db.query(Activity)
+                .filter(Activity.project_id.in_(pids))
+                .order_by(Activity.created_at.desc())
+                .limit(10)
+                .all()
+            )
+        else:
+            recent = []
 
     activity_list = []
     for a in recent:
@@ -1598,21 +1630,31 @@ def list_activities(
     if current_user.role == "STUDENT":
         mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
-        projects = db.query(Project).filter(Project.group_id.in_(gids)).all() if gids else []
-        pids = [p.id for p in projects if has_project_access(p, current_user, db)]
+        pids = [p.id for p in db.query(Project).filter(Project.group_id.in_(gids)).all()] if gids else []
         recent = (
             db.query(Activity)
             .filter(Activity.project_id.in_(pids))
             .order_by(Activity.created_at.desc())
             .all()
-        )
+        ) if pids else []
     else:
-        recent_all = db.query(Activity).order_by(Activity.created_at.desc()).all()
-        recent = []
-        for a in recent_all:
-            pr = db.query(Project).filter(Project.id == a.project_id).first()
-            if pr and has_project_access(pr, current_user, db):
-                recent.append(a)
+        # STAFF: activities scoped to their workspace projects
+        my_ws_ids = [
+            ws.id for ws in db.query(Workspace).filter(Workspace.created_by == current_user.id).all()
+        ]
+        if my_ws_ids:
+            ws_pids = [
+                wp.project_id for wp in db.query(WorkspaceProject)
+                .filter(WorkspaceProject.workspace_id.in_(my_ws_ids)).all()
+            ]
+            recent = (
+                db.query(Activity)
+                .filter(Activity.project_id.in_(ws_pids))
+                .order_by(Activity.created_at.desc())
+                .all()
+            ) if ws_pids else []
+        else:
+            recent = db.query(Activity).order_by(Activity.created_at.desc()).all()
 
     activity_list = []
     for a in recent:
