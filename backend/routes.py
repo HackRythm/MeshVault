@@ -43,12 +43,12 @@ def get_current_user(
 
 
 def has_workspace_access(workspace_id: int, current_user: User, db: Session) -> bool:
-    if current_user.role == "STAFF":
-        return True
-
     ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not ws:
         return False
+
+    if current_user.role == "STAFF":
+        return ws.created_by == current_user.id
 
     # Student must belong to at least one group in this workspace
     mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()

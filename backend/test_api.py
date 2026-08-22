@@ -108,7 +108,7 @@ def run_tests():
     proj_id = "AID-DSA-G11-01"
     new_proj = {
         "project_id": proj_id,
-        "name": "MeshVault UI & Backend",
+        "name": "meshvault-ui-backend",
         "description": "Integration testing of Stitch frontend and FastAPI backend.",
         "workspace_id": workspace_id,
         "group_id": group_id,
