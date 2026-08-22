@@ -16,7 +16,7 @@ from datetime import datetime, date, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from database import engine, SessionLocal, Base
-from models import User, Workspace, Group, GroupMembership, Project, Milestone, Activity
+from models import User, Workspace, Group, GroupMembership, Project, Milestone, Activity, WorkspaceGroup, WorkspaceProject
 from auth import hash_password, Role
 
 
@@ -83,6 +83,7 @@ def seed():
             description="Workspace for the Data Structures & Algorithms course "
                         "projects and lab assignments.",
             created_by=staff.id,
+            join_code="WS-SEED01",
         )
         db.add(workspace)
         db.flush()
@@ -98,7 +99,6 @@ def seed():
         groups = []
         for name, desc in groups_data:
             group = Group(
-                workspace_id=workspace.id,
                 name=name,
                 description=desc,
                 code=f"GP-{name.upper().replace(' ', '')}",
@@ -109,6 +109,16 @@ def seed():
 
         db.flush()
         print(f"  [Groups]  {len(groups)} groups created")
+
+        # Insert WorkspaceGroup mappings
+        for g in groups:
+            db.add(WorkspaceGroup(
+                workspace_id=workspace.id,
+                group_id=g.id,
+                requested_by=students[0].id,
+                status="APPROVED"
+            ))
+        db.flush()
 
         # ─── 6 Group Memberships (2 students per group) ──────────────────
         membership_pairs = [
@@ -184,7 +194,6 @@ def seed():
                 project_id=pdata["project_id"],
                 name=pdata["name"],
                 description=pdata["description"],
-                workspace_id=workspace.id,
                 group_id=pdata["group"].id,
                 course="CS201",
                 status=pdata["status"],
@@ -197,6 +206,19 @@ def seed():
 
         db.flush()
         print(f"  [Projects] {len(projects)} projects created")
+
+        # Insert WorkspaceProject mappings as APPROVED
+        for p in projects:
+            # Find requester (leader or first member of the group)
+            g_mem = db.query(GroupMembership).filter(GroupMembership.group_id == p.group_id).first()
+            req_by = g_mem.user_id if g_mem else students[0].id
+            db.add(WorkspaceProject(
+                workspace_id=workspace.id,
+                project_id=p.id,
+                requested_by=req_by,
+                status="APPROVED"
+            ))
+        db.flush()
 
         # ─── 6 Milestones ─────────────────────────────────────────────────
         milestones_data = [

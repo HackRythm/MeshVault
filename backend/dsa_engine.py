@@ -56,12 +56,15 @@ class ProjectSearchIndex:
     @staticmethod
     def _project_to_data(project) -> dict:
         """Convert a SQLAlchemy Project instance to a plain dict."""
+        wps = getattr(project, "workspace_projects", [])
+        workspace_ids = [wp.workspace_id for wp in wps if wp.status == "APPROVED"]
+        workspace_id = workspace_ids[0] if workspace_ids else None
         return {
             "id": project.id,
             "project_id": project.project_id,
             "name": project.name,
             "description": project.description,
-            "workspace_id": project.workspace_id,
+            "workspace_id": workspace_id,
             "group_id": project.group_id,
             "course": project.course,
             "status": project.status,
@@ -412,12 +415,15 @@ class ProgressBST:
         self.root = None
         projects = db_session.query(Project).all()
         for project in projects:
+            wps = getattr(project, "workspace_projects", [])
+            workspace_ids = [wp.workspace_id for wp in wps if wp.status == "APPROVED"]
+            workspace_id = workspace_ids[0] if workspace_ids else None
             data = {
                 "id": project.id,
                 "project_id": project.project_id,
                 "name": project.name,
                 "description": project.description,
-                "workspace_id": project.workspace_id,
+                "workspace_id": workspace_id,
                 "group_id": project.group_id,
                 "course": project.course,
                 "status": project.status,

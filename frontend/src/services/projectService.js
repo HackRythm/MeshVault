@@ -12,6 +12,11 @@ const projectService = {
     return api.get(`/api/projects/${projectId}`);
   },
 
+  /** Get project detail scoped to a specific workspace (faculty evaluation view) */
+  async getWorkspaceProject(workspaceId, projectId) {
+    return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}`);
+  },
+
   async createProject(data) {
     return api.post('/api/projects', data);
   },
@@ -59,12 +64,54 @@ const projectService = {
     return api.post('/api/review-queue/process');
   },
 
+  /** Legacy: global comments (no workspace scope). Kept for backward compat. */
   async getReviewComments(projectId) {
     return api.get(`/api/projects/${projectId}/comments`);
   },
 
-  async addReviewComment(projectId, commentText) {
-    return api.post(`/api/projects/${projectId}/comments`, { comment: commentText });
+  // ─── Workspace-scoped comment methods ───────────────────────────────────────
+
+  /** Get workspace-scoped comments for a project.
+   *  Visible only to: workspace host + members of that project's group.
+   */
+  async getWorkspaceComments(workspaceId, projectId) {
+    return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/comments`);
+  },
+
+  /** Post a review comment (Faculty only). */
+  async addWorkspaceComment(workspaceId, projectId, commentText) {
+    return api.post(
+      `/api/workspaces/${workspaceId}/projects/${projectId}/comments`,
+      { comment: commentText }
+    );
+  },
+
+  /** Reply to a review comment (Faculty and group-member students). */
+  async replyToComment(workspaceId, projectId, commentId, replyText) {
+    return api.post(
+      `/api/workspaces/${workspaceId}/projects/${projectId}/comments/${commentId}/reply`,
+      { comment: replyText }
+    );
+  },
+
+  // ─── Evaluation (grading history) methods ────────────────────────────────────
+
+  /** List all grading history for a project in a workspace. Faculty only. */
+  async getEvaluations(workspaceId, projectId) {
+    return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/evaluations`);
+  },
+
+  /** Get the most recent evaluation. Faculty only. */
+  async getLatestEvaluation(workspaceId, projectId) {
+    return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/evaluations/latest`);
+  },
+
+  /** Submit a new grading evaluation (appends to history). Faculty only. */
+  async submitEvaluation(workspaceId, projectId, data) {
+    return api.post(
+      `/api/workspaces/${workspaceId}/projects/${projectId}/evaluations`,
+      data
+    );
   },
 };
 

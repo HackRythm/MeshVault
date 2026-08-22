@@ -59,18 +59,69 @@ class Workspace(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_restricted = Column(Boolean, default=False, nullable=False)
+    join_code = Column(String(50), unique=True, nullable=True, index=True)
 
     # Relationships
     creator = relationship("User", back_populates="created_workspaces")
-    groups = relationship(
-        "Group", back_populates="workspace", cascade="all, delete-orphan"
+    workspace_groups = relationship(
+        "WorkspaceGroup", back_populates="workspace", cascade="all, delete-orphan"
     )
-    projects = relationship(
-        "Project", back_populates="workspace", cascade="all, delete-orphan"
+    workspace_projects = relationship(
+        "WorkspaceProject", back_populates="workspace", cascade="all, delete-orphan"
     )
 
     def __repr__(self):
         return f"<Workspace {self.course_code}: {self.name}>"
+
+
+# ─── WorkspaceGroup ──────────────────────────────────────────────────────────
+
+class WorkspaceGroup(Base):
+    __tablename__ = "workspace_groups"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(30), nullable=False, default="PENDING")  # PENDING | APPROVED | REJECTED | REMOVAL_PENDING | REMOVED
+    rejection_reason = Column(Text, nullable=True)
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    workspace = relationship("Workspace", back_populates="workspace_groups")
+    group = relationship("Group", back_populates="workspace_groups")
+    requester = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "group_id", name="uq_workspace_group"),
+    )
+
+
+# ─── WorkspaceProject ────────────────────────────────────────────────────────
+
+class WorkspaceProject(Base):
+    __tablename__ = "workspace_projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    status = Column(String(30), nullable=False, default="PENDING")  # PENDING | APPROVED | REJECTED | REMOVAL_PENDING | REMOVED
+    rejection_reason = Column(Text, nullable=True)
+    requested_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    approved_at = Column(DateTime, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    workspace = relationship("Workspace", back_populates="workspace_projects")
+    project = relationship("Project", back_populates="workspace_projects")
+    requester = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "project_id", name="uq_workspace_project"),
+    )
 
 
 # ─── Group ───────────────────────────────────────────────────────────────────
@@ -79,7 +130,6 @@ class Group(Base):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     code = Column(String(50), unique=True, nullable=True, index=True)
@@ -87,7 +137,9 @@ class Group(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
-    workspace = relationship("Workspace", back_populates="groups")
+    workspace_groups = relationship(
+        "WorkspaceGroup", back_populates="group", cascade="all, delete-orphan"
+    )
     memberships = relationship(
         "GroupMembership", back_populates="group", cascade="all, delete-orphan"
     )
@@ -132,7 +184,6 @@ class Project(Base):
     project_id = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
     course = Column(String(100), nullable=True)
     status = Column(String(30), nullable=False, default="NOT_STARTED")
@@ -143,7 +194,9 @@ class Project(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    workspace = relationship("Workspace", back_populates="projects")
+    workspace_projects = relationship(
+        "WorkspaceProject", back_populates="project", cascade="all, delete-orphan"
+    )
     group = relationship("Group", back_populates="projects")
     milestones = relationship(
         "Milestone", back_populates="project", cascade="all, delete-orphan"
@@ -284,12 +337,49 @@ class ReviewComment(Base):
     __tablename__ = "review_comments"
 
     id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    parent_comment_id = Column(Integer, ForeignKey("review_comments.id", ondelete="CASCADE"), nullable=True)
     comment = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
+    workspace = relationship("Workspace")
     project = relationship("Project")
     user = relationship("User")
+    # Self-referential: a top-level comment can have many replies
+    replies = relationship(
+        "ReviewComment",
+        primaryjoin="ReviewComment.parent_comment_id == ReviewComment.id",
+        foreign_keys="ReviewComment.parent_comment_id",
+        lazy="select",
+    )
+
+
+# ─── Project Evaluation ────────────────────────────────────────────────────────
+
+class ProjectEvaluation(Base):
+    """Append-only grading history. Each evaluation event creates a new record.
+    Faculty can never modify a previous evaluation — only add a new one.
+    Workspace-scoped so cross-workspace isolation is enforced at query time.
+    """
+    __tablename__ = "project_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    evaluator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    grading_scheme_id = Column(Integer, ForeignKey("grading_schemes.id"), nullable=True)
+    score = Column(Float, nullable=False)  # aggregate score
+    max_score = Column(Float, nullable=False, default=100.0)
+    notes = Column(Text, nullable=True)
+    criterion_scores = Column(Text, nullable=True)  # JSON string: [{criterion_id, name, score, max_marks}]
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    workspace = relationship("Workspace")
+    project = relationship("Project")
+    evaluator = relationship("User")
+    grading_scheme = relationship("GradingScheme")
 

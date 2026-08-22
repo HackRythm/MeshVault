@@ -63,6 +63,7 @@ class WorkspaceOut(BaseModel):
     description: Optional[str]
     created_by: int
     created_at: datetime
+    join_code: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -78,7 +79,6 @@ class GroupCreate(BaseModel):
 
 class GroupOut(BaseModel):
     id: int
-    workspace_id: Optional[int] = None
     name: str
     description: Optional[str]
     code: Optional[str] = None
@@ -95,7 +95,6 @@ class ProjectCreate(BaseModel):
     project_id: str  # Manually entered by the user
     name: str
     description: Optional[str] = None
-    workspace_id: Optional[int] = None
     group_id: int
     course: Optional[str] = None
     status: str = "NOT_STARTED"
@@ -119,7 +118,6 @@ class ProjectOut(BaseModel):
     project_id: str
     name: str
     description: Optional[str]
-    workspace_id: Optional[int]
     group_id: int
     course: Optional[str]
     status: str
@@ -271,10 +269,47 @@ class ReviewCommentCreate(BaseModel):
 
 class ReviewCommentOut(BaseModel):
     id: int
+    workspace_id: Optional[int] = None
     project_id: int
     user_id: int
     user_name: str
+    is_faculty: bool = False
+    parent_comment_id: Optional[int] = None
     comment: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Project Evaluation (Faculty Grading History) ──────────────────────────────────────────
+
+class CriterionScore(BaseModel):
+    criterion_id: Optional[int] = None
+    name: str
+    score: float
+    max_marks: float
+
+
+class EvaluationCreate(BaseModel):
+    score: float
+    max_score: float = 100.0
+    notes: Optional[str] = None
+    grading_scheme_id: Optional[int] = None
+    criterion_scores: Optional[List[CriterionScore]] = None
+
+
+class EvaluationOut(BaseModel):
+    id: int
+    workspace_id: int
+    project_id: int
+    evaluator_id: int
+    evaluator_name: str
+    grading_scheme_id: Optional[int] = None
+    score: float
+    max_score: float
+    notes: Optional[str] = None
+    criterion_scores: Optional[str] = None  # raw JSON string
     created_at: datetime
 
     class Config:
@@ -283,5 +318,24 @@ class ReviewCommentOut(BaseModel):
 
 class GroupJoinRequest(BaseModel):
     code: str
+
+
+# ─── Workspace Group/Project Join Requests (Phase 2) ─────────────────────────
+
+class WorkspaceJoinRequest(BaseModel):
+    workspace_code: str
+    group_id: int
+    project_ids: List[str]
+
+
+class WorkspaceRequestProcess(BaseModel):
+    action: str  # "APPROVE_ALL" | "REJECT_ALL" | "PROCESS_INDIVIDUALLY"
+    approved_project_ids: Optional[List[str]] = None
+    rejected_project_ids: Optional[List[str]] = None
+    rejection_reason: Optional[str] = None
+
+
+class DirectRemovalRequest(BaseModel):
+    reason: str
 
 

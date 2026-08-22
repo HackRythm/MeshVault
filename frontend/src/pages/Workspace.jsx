@@ -378,6 +378,24 @@ export default function Workspace() {
         <LoadingSpinner message="Loading workspace elements..." />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+          {/* ─── Workspace Join Code (host only) ─── */}
+          {selectedWs && user.role === 'STAFF' && selectedWs.join_code && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 'var(--radius)', marginBottom: '4px' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: '500' }}>🔑 Workspace Join Code:</span>
+              <code style={{ fontSize: '15px', fontWeight: '700', letterSpacing: '2px', color: 'var(--text-accent)', background: 'rgba(99,102,241,0.12)', padding: '4px 10px', borderRadius: '6px' }}>
+                {selectedWs.join_code}
+              </code>
+              <button
+                onClick={() => navigator.clipboard.writeText(selectedWs.join_code)}
+                className="btn btn--ghost btn--sm"
+                style={{ fontSize: '11px' }}
+              >
+                📋 Copy
+              </button>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Share with group leaders to join this workspace</span>
+            </div>
+          )}
+
           {selectedWs?.description && (
             <p style={{ color: 'var(--text-secondary)', fontSize: '13.5px', background: 'rgba(255,255,255,0.01)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
               {selectedWs.description}
@@ -394,17 +412,39 @@ export default function Workspace() {
                 ))}
               </div>
             ) : (
-              <EmptyState icon="👥" title="No groups established" text="No lab teams have been formed inside this workspace yet." />
+              <EmptyState icon="👥" title="No groups established" text="No lab teams have been approved inside this workspace yet." />
             )}
           </div>
 
-          {/* Projects Section */}
+          {/* Projects Section — linked with workspace context for faculty evaluation */}
           <div className="detail-section">
             <h2 className="detail-section__title">Workspace Projects ({wsDetail?.projects?.length || 0})</h2>
             {wsDetail?.projects?.length > 0 ? (
               <div className="grid grid--3">
                 {wsDetail.projects.map(proj => (
-                  <ProjectCard key={proj.project_id} project={proj} />
+                  <div key={proj.project_id} className="card" style={{ padding: '18px', cursor: 'pointer', transition: 'border-color 0.2s', border: '1px solid var(--border)' }}
+                    onClick={() => window.location.href = `/projects/${proj.project_id}?workspace_id=${selectedWs.id}`}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <h3 style={{ fontSize: '14px', fontWeight: '600', margin: 0 }}>{proj.name}</h3>
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{proj.project_id}</div>
+                    {proj.group_name && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>Group: {proj.group_name}</div>}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                      <span className={`badge ${proj.status === 'COMPLETED' ? 'badge--success' : proj.status === 'IN_PROGRESS' ? 'badge--warning' : 'badge--muted'}`} style={{ fontSize: '10px' }}>
+                        {proj.status?.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-bar__fill" style={{ width: `${proj.progress || 0}%` }} />
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'right' }}>{Math.round(proj.progress || 0)}% complete</div>
+                    {user.role === 'STAFF' && (
+                      <div style={{ marginTop: '10px', fontSize: '11px', color: 'rgba(99,102,241,0.8)', fontWeight: '500' }}>
+                        📊 View Evaluation & Comments →
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             ) : (
