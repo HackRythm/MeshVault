@@ -9,9 +9,11 @@ import json
 
 BASE_URL = "http://localhost:8000"
 
-def make_request(path, method="GET", data=None):
+def make_request(path, method="GET", data=None, token=None):
     url = f"{BASE_URL}{path}"
     headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     
     req_data = None
     if data:
@@ -55,6 +57,7 @@ def run_tests():
     assert body["success"] is True
     assert body["user"]["role"] == "STAFF"
     staff_id = body["user"]["id"]
+    staff_token = body["token"]
     
     # 3. Authenticate Student
     login_data = {
@@ -68,9 +71,10 @@ def run_tests():
     assert body["success"] is True
     assert body["user"]["role"] == "STUDENT"
     student_id = body["user"]["id"]
+    student_token = body["token"]
     
     # 4. Workspace API — Staff View
-    status, body = make_request(f"/api/workspaces?user_id={staff_id}&role=STAFF")
+    status, body = make_request(f"/api/workspaces", token=staff_token)
     print(f"\n[GET /api/workspaces] Staff View: {status}")
     print(f"  Found {len(body)} workspaces")
     assert status == 200
@@ -78,14 +82,14 @@ def run_tests():
     workspace_id = body[0]["id"]
     
     # 5. Workspace API — Student View
-    status, body = make_request(f"/api/workspaces?user_id={student_id}&role=STUDENT")
+    status, body = make_request(f"/api/workspaces", token=student_token)
     print(f"\n[GET /api/workspaces] Student View: {status}")
     print(f"  Found {len(body)} workspaces")
     assert status == 200
     assert len(body) == 1  # Student is only in 1 group/workspace
     
     # 6. Groups API
-    status, body = make_request(f"/api/groups?workspace_id={workspace_id}")
+    status, body = make_request(f"/api/groups?workspace_id={workspace_id}", token=staff_token)
     print(f"\n[GET /api/groups] List Groups: {status}")
     print(f"  Found {len(body)} groups")
     assert status == 200
@@ -93,7 +97,7 @@ def run_tests():
     group_id = body[0]["id"]
     
     # Get group details
-    status, body = make_request(f"/api/groups/{group_id}")
+    status, body = make_request(f"/api/groups/{group_id}", token=staff_token)
     print(f"[GET /api/groups/{group_id}] Detail: {status}")
     print(f"  Name: {body['name']}")
     print(f"  Members: {[m['name'] for m in body['members']]}")
@@ -114,20 +118,20 @@ def run_tests():
         "progress": 20.0,
         "deadline": "2026-09-30"
     }
-    status, body = make_request("/api/projects", method="POST", data=new_proj)
+    status, body = make_request("/api/projects", method="POST", data=new_proj, token=staff_token)
     print(f"\n[POST /api/projects] Create: {status}")
     print(body)
     # Check if already exists or successfully created
     assert status in (201, 409)
     
     # Verify duplicate Project ID error
-    status_dup, body_dup = make_request("/api/projects", method="POST", data=new_proj)
+    status_dup, body_dup = make_request("/api/projects", method="POST", data=new_proj, token=staff_token)
     print(f"[POST /api/projects] Duplicate Check: {status_dup}")
     print(body_dup)
     assert status_dup == 409
     
     # 8. Project Detail
-    status, body = make_request(f"/api/projects/{proj_id}")
+    status, body = make_request(f"/api/projects/{proj_id}", token=staff_token)
     print(f"\n[GET /api/projects/{proj_id}] Detail: {status}")
     print(f"  Name: {body['name']}")
     print(f"  Status: {body['status']}")
@@ -137,7 +141,7 @@ def run_tests():
     
     # 9. Smart Search via dsa_engine.ProjectSearchIndex
     # Search by exact ID
-    status, body = make_request(f"/api/search/projects?q={proj_id}")
+    status, body = make_request(f"/api/search/projects?q={proj_id}", token=staff_token)
     print(f"\n[GET /api/search/projects] Query: '{proj_id}': {status}")
     print(body)
     assert status == 200
@@ -146,7 +150,7 @@ def run_tests():
     
     # Search by partial ID / substring
     query = "G11"
-    status, body = make_request(f"/api/search/projects?q={query}")
+    status, body = make_request(f"/api/search/projects?q={query}", token=staff_token)
     print(f"\n[GET /api/search/projects] Query: '{query}': {status}")
     print(f"  Found {body['count']} result(s)")
     assert status == 200
@@ -154,7 +158,7 @@ def run_tests():
     
     # Search by partial Name
     query = "Mesh"
-    status, body = make_request(f"/api/search/projects?q={query}")
+    status, body = make_request(f"/api/search/projects?q={query}", token=staff_token)
     print(f"\n[GET /api/search/projects] Query: '{query}': {status}")
     print(f"  Found {body['count']} result(s)")
     print(f"  Matched Names: {[r['name'] for r in body['results']]}")
@@ -162,7 +166,7 @@ def run_tests():
     assert body["count"] >= 1
     
     # 10. Dashboard API
-    status, body = make_request(f"/api/dashboard?user_id={staff_id}&role=STAFF")
+    status, body = make_request(f"/api/dashboard", token=staff_token)
     print(f"\n[GET /api/dashboard] Staff view: {status}")
     print(f"  Total Projects: {body['total_projects']}")
     print(f"  Active Projects: {body['active_projects']}")
@@ -170,6 +174,11 @@ def run_tests():
     print(f"  Recent Activity Log Count: {len(body['recent_activity'])}")
     assert status == 200
     
+    # 11. Security Test - Student attempting Staff Action
+    status, body = make_request(f"/api/students", token=student_token)
+    print(f"\n[GET /api/students] Student Attempt: {status}")
+    assert status == 403
+
     print("\n==================================================")
     print("  ALL API INTEGRATION TESTS PASSED SUCCESSFULLY!")
     print("==================================================")

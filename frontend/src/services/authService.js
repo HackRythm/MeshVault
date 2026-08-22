@@ -6,9 +6,14 @@ const authService = {
   async login(email, password) {
     const res = await api.post('/api/auth/login', { email, password });
     if (res.success && res.user) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(res.user));
+      const sessionData = { ...res.user, token: res.token };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(sessionData));
     }
     return res;
+  },
+
+  async getStudents() {
+    return api.get('/api/students');
   },
 
   logout() {

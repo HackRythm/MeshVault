@@ -5,8 +5,6 @@ const projectService = {
     const p = new URLSearchParams();
     if (workspaceId) p.append('workspace_id', workspaceId);
     if (groupId)     p.append('group_id', groupId);
-    if (userId)      p.append('user_id', userId);
-    if (role)        p.append('role', role);
     return api.get(`/api/projects?${p}`);
   },
 
@@ -31,18 +29,13 @@ const projectService = {
   },
 
   async getDashboard(userId, role) {
-    const p = new URLSearchParams();
-    if (userId) p.append('user_id', userId);
-    if (role)   p.append('role', role);
-    return api.get(`/api/dashboard?${p}`);
+    return api.get(`/api/dashboard`);
   },
 
   async getProgressRange(min, max, userId, role) {
     const p = new URLSearchParams();
     p.append('min', min);
     p.append('max', max);
-    if (userId) p.append('user_id', userId);
-    if (role)   p.append('role', role);
     return api.get(`/api/progress/range?${p}`);
   },
 
@@ -64,6 +57,14 @@ const projectService = {
 
   async processReviewRequest() {
     return api.post('/api/review-queue/process');
+  },
+
+  async getReviewComments(projectId) {
+    return api.get(`/api/projects/${projectId}/comments`);
+  },
+
+  async addReviewComment(projectId, commentText) {
+    return api.post(`/api/projects/${projectId}/comments`, { comment: commentText });
   },
 };
 

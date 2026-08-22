@@ -3,20 +3,85 @@ MeshVault API Routes
 All API endpoints for the MeshVault local backend.
 """
 
+import secrets
 from datetime import date
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from database import get_db
 from models import (
     User, Workspace, Group, GroupMembership, Project, Milestone, Activity, ReviewRequest,
+    UserSession, WorkspaceAccess, GradingScheme, GradingCriterion, ReviewComment
 )
-from schemas import LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate
+from schemas import (
+    LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate,
+    WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate
+)
 from auth import authenticate_user
 
 router = APIRouter(prefix="/api")
+
+security = HTTPBearer(auto_error=False)
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+    db: Session = Depends(get_db)
+) -> User:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = credentials.credentials
+    session = db.query(UserSession).filter(UserSession.token == token).first()
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    user = db.query(User).filter(User.id == session.user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def has_workspace_access(workspace_id: int, current_user: User, db: Session) -> bool:
+    if current_user.role == "STAFF":
+        return True
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        return False
+
+    # Student must belong to at least one group in this workspace
+    mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
+    gids = [m.group_id for m in mems]
+    if not gids:
+        return False
+
+    ws_groups = db.query(Group).filter(Group.workspace_id == workspace_id, Group.id.in_(gids)).all()
+    if not ws_groups:
+        return False
+
+    if not ws.is_restricted:
+        return True
+
+    # Restricted: check explicit permissions
+    # 1. Allowed individually?
+    access = db.query(WorkspaceAccess).filter(
+        WorkspaceAccess.workspace_id == workspace_id,
+        WorkspaceAccess.user_id == current_user.id
+    ).first()
+    if access:
+        return True
+
+    # 2. Allowed via group?
+    ws_gids = [g.id for g in ws_groups]
+    access_group = db.query(WorkspaceAccess).filter(
+        WorkspaceAccess.workspace_id == workspace_id,
+        WorkspaceAccess.group_id.in_(ws_gids)
+    ).first()
+    if access_group:
+        return True
+
+    return False
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────────
@@ -27,8 +92,16 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     user = authenticate_user(db, body.email, body.password)
     if user is None:
         return {"success": False, "message": "Invalid credentials"}
+    
+    # Generate session token
+    token = secrets.token_hex(32)
+    session = UserSession(user_id=user.id, token=token)
+    db.add(session)
+    db.commit()
+    
     return {
         "success": True,
+        "token": token,
         "user": {
             "id": user.id,
             "user_id": user.user_id,
@@ -44,21 +117,21 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
 
 @router.get("/workspaces")
 def list_workspaces(
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List workspaces — role-aware filtering."""
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         if not gids:
             return []
         grps = db.query(Group).filter(Group.id.in_(gids)).all()
         wids = list({g.workspace_id for g in grps})
-        workspaces = db.query(Workspace).filter(Workspace.id.in_(wids)).all()
-    elif role == "STAFF" and user_id:
-        workspaces = db.query(Workspace).filter(Workspace.created_by == user_id).all()
+        allowed_wids = [wid for wid in wids if has_workspace_access(wid, current_user, db)]
+        workspaces = db.query(Workspace).filter(Workspace.id.in_(allowed_wids)).all()
+    elif current_user.role == "STAFF":
+        workspaces = db.query(Workspace).filter(Workspace.created_by == current_user.id).all()
     else:
         workspaces = db.query(Workspace).all()
 
@@ -82,20 +155,27 @@ def list_workspaces(
             "group_count": len(ws_groups),
             "project_count": db.query(Project).filter(Project.workspace_id == w.id).count(),
             "student_count": student_count,
+            "is_restricted": w.is_restricted,
         })
     return result
 
 
 @router.post("/workspaces", status_code=201)
-def create_workspace(body: WorkspaceCreate, user_id: int, db: Session = Depends(get_db)):
+def create_workspace(
+    body: WorkspaceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a new academic workspace."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
     ws = Workspace(
         name=body.name,
         course_code=body.course_code,
         course_name=body.course_name,
         academic_year=body.academic_year,
         description=body.description,
-        created_by=user_id,
+        created_by=current_user.id,
     )
     db.add(ws)
     db.commit()
@@ -115,11 +195,13 @@ def create_workspace(body: WorkspaceCreate, user_id: int, db: Session = Depends(
 @router.get("/workspaces/{workspace_id}")
 def get_workspace(
     workspace_id: int,
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Single workspace with its groups and projects."""
+    if not has_workspace_access(workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not ws:
         raise HTTPException(404, "Workspace not found")
@@ -127,8 +209,8 @@ def get_workspace(
     groups_query = db.query(Group).filter(Group.workspace_id == workspace_id)
     projects_query = db.query(Project).filter(Project.workspace_id == workspace_id)
 
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         groups_query = groups_query.filter(Group.id.in_(gids))
         projects_query = projects_query.filter(Project.group_id.in_(gids))
@@ -158,6 +240,7 @@ def get_workspace(
         "academic_year": ws.academic_year,
         "description": ws.description,
         "created_at": str(ws.created_at),
+        "is_restricted": ws.is_restricted,
         "groups": group_list,
         "projects": project_list,
     }
@@ -168,40 +251,50 @@ def get_workspace(
 @router.get("/groups")
 def list_groups(
     workspace_id: Optional[int] = None,
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List groups — optionally filtered by workspace or user role."""
+    if workspace_id and not has_workspace_access(workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     query = db.query(Group)
     if workspace_id:
         query = query.filter(Group.workspace_id == workspace_id)
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         query = query.filter(Group.id.in_(gids))
 
     groups = query.all()
     result = []
     for g in groups:
-        result.append({
-            "id": g.id,
-            "workspace_id": g.workspace_id,
-            "name": g.name,
-            "description": g.description,
-            "created_at": str(g.created_at),
-            "member_count": db.query(GroupMembership).filter(GroupMembership.group_id == g.id).count(),
-            "project_count": db.query(Project).filter(Project.group_id == g.id).count(),
-        })
+        if has_workspace_access(g.workspace_id, current_user, db):
+            result.append({
+                "id": g.id,
+                "workspace_id": g.workspace_id,
+                "name": g.name,
+                "description": g.description,
+                "created_at": str(g.created_at),
+                "member_count": db.query(GroupMembership).filter(GroupMembership.group_id == g.id).count(),
+                "project_count": db.query(Project).filter(Project.group_id == g.id).count(),
+            })
     return result
 
 
 @router.get("/groups/{group_id}")
-def get_group(group_id: int, db: Session = Depends(get_db)):
+def get_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Single group with members and projects."""
     grp = db.query(Group).filter(Group.id == group_id).first()
     if not grp:
         raise HTTPException(404, "Group not found")
+
+    if not has_workspace_access(grp.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     mems = db.query(GroupMembership).filter(GroupMembership.group_id == group_id).all()
     members = []
@@ -233,18 +326,20 @@ def get_group(group_id: int, db: Session = Depends(get_db)):
 def list_projects(
     workspace_id: Optional[int] = None,
     group_id: Optional[int] = None,
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """List projects with group/workspace names attached."""
+    if workspace_id and not has_workspace_access(workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     query = db.query(Project)
     if workspace_id:
         query = query.filter(Project.workspace_id == workspace_id)
     if group_id:
         query = query.filter(Project.group_id == group_id)
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         if not gids:
             return []
@@ -253,17 +348,28 @@ def list_projects(
     projects = query.order_by(Project.created_at.desc()).all()
     result = []
     for p in projects:
-        grp = db.query(Group).filter(Group.id == p.group_id).first()
-        ws = db.query(Workspace).filter(Workspace.id == p.workspace_id).first()
-        d = _project_dict(p, grp)
-        d["workspace_name"] = ws.name if ws else ""
-        result.append(d)
+        if has_workspace_access(p.workspace_id, current_user, db):
+            grp = db.query(Group).filter(Group.id == p.group_id).first()
+            ws = db.query(Workspace).filter(Workspace.id == p.workspace_id).first()
+            d = _project_dict(p, grp)
+            d["workspace_name"] = ws.name if ws else ""
+            result.append(d)
     return result
 
 
 @router.post("/projects", status_code=201)
-def create_project(body: ProjectCreate, request: Request, db: Session = Depends(get_db)):
+def create_project(
+    body: ProjectCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a project — validates unique project_id."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not has_workspace_access(body.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     if db.query(Project).filter(Project.project_id == body.project_id).first():
         raise HTTPException(409, "Project ID already exists")
     ws = db.query(Workspace).filter(Workspace.id == body.workspace_id).first()
@@ -302,11 +408,26 @@ def create_project(body: ProjectCreate, request: Request, db: Session = Depends(
 
 
 @router.get("/projects/{project_id}")
-def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Full project detail with milestones, activities, and group members."""
     proj = db.query(Project).filter(Project.project_id == project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
+
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(
+            GroupMembership.user_id == current_user.id,
+            GroupMembership.group_id == proj.group_id
+        ).first()
+        if not mems:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
     grp = db.query(Group).filter(Group.id == proj.group_id).first()
     ws = db.query(Workspace).filter(Workspace.id == proj.workspace_id).first()
@@ -364,11 +485,23 @@ def update_project(
     body: ProjectUpdate,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a project — refreshes search index and Progress BST."""
     proj = db.query(Project).filter(Project.project_id == project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
+
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(
+            GroupMembership.user_id == current_user.id,
+            GroupMembership.group_id == proj.group_id
+        ).first()
+        if not mems:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
     old_project_data = _project_dict(proj)
 
@@ -398,11 +531,22 @@ def update_project(
 
 
 @router.delete("/projects/{project_id}")
-def delete_project(project_id: str, request: Request, db: Session = Depends(get_db)):
+def delete_project(
+    project_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete a project and remove it from search index and Progress BST."""
     proj = db.query(Project).filter(Project.project_id == project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
+
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     project_data = _project_dict(proj)
 
@@ -420,11 +564,27 @@ def delete_project(project_id: str, request: Request, db: Session = Depends(get_
 # ─── Milestones ──────────────────────────────────────────────────────────────
 
 @router.post("/projects/{project_id}/milestones", status_code=201)
-def add_milestone(project_id: str, body: MilestoneCreate, db: Session = Depends(get_db)):
+def add_milestone(
+    project_id: str,
+    body: MilestoneCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Add a milestone to a project."""
     proj = db.query(Project).filter(Project.project_id == project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
+
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(
+            GroupMembership.user_id == current_user.id,
+            GroupMembership.group_id == proj.group_id
+        ).first()
+        if not mems:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
     ms = Milestone(
         project_id=proj.id,
@@ -447,31 +607,29 @@ def add_milestone(project_id: str, body: MilestoneCreate, db: Session = Depends(
         "created_at": str(ms.created_at),
     }
 
-
-# ─── Dashboard ───────────────────────────────────────────────────────────────
-
 @router.get("/dashboard")
 def get_dashboard(
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Aggregated dashboard stats — role-aware."""
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         total_groups = len(gids)
         total_students = sum(
             db.query(GroupMembership).filter(GroupMembership.group_id == gid).count()
             for gid in gids
         )
-        projects = (
+        all_projects = (
             db.query(Project).filter(Project.group_id.in_(gids)).all() if gids else []
         )
+        projects = [p for p in all_projects if has_workspace_access(p.workspace_id, current_user, db)]
     else:
         total_groups = db.query(Group).count()
         total_students = db.query(User).filter(User.role == "STUDENT").count()
-        projects = db.query(Project).all()
+        all_projects = db.query(Project).all()
+        projects = [p for p in all_projects if has_workspace_access(p.workspace_id, current_user, db)]
 
     total_projects = len(projects)
     active_projects = sum(1 for p in projects if p.status == "IN_PROGRESS")
@@ -497,7 +655,7 @@ def get_dashboard(
     )[:5]
 
     # Recent activity
-    if role == "STUDENT" and user_id and projects:
+    if current_user.role == "STUDENT" and projects:
         pids = [p.id for p in projects]
         recent = (
             db.query(Activity)
@@ -507,7 +665,14 @@ def get_dashboard(
             .all()
         )
     else:
-        recent = db.query(Activity).order_by(Activity.created_at.desc()).limit(10).all()
+        recent_all = db.query(Activity).order_by(Activity.created_at.desc()).all()
+        recent = []
+        for a in recent_all:
+            pr = db.query(Project).filter(Project.id == a.project_id).first()
+            if pr and has_workspace_access(pr.workspace_id, current_user, db):
+                recent.append(a)
+                if len(recent) >= 10:
+                    break
 
     activity_list = []
     for a in recent:
@@ -524,8 +689,8 @@ def get_dashboard(
         })
 
     group_members = []
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         if gids:
             all_mems = db.query(GroupMembership).filter(GroupMembership.group_id.in_(gids)).all()
@@ -553,16 +718,15 @@ def get_dashboard(
 
 @router.get("/activities")
 def list_activities(
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Retrieve full audit activities — role-aware scoping."""
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         projects = db.query(Project).filter(Project.group_id.in_(gids)).all() if gids else []
-        pids = [p.id for p in projects]
+        pids = [p.id for p in projects if has_workspace_access(p.workspace_id, current_user, db)]
         recent = (
             db.query(Activity)
             .filter(Activity.project_id.in_(pids))
@@ -570,7 +734,12 @@ def list_activities(
             .all()
         )
     else:
-        recent = db.query(Activity).order_by(Activity.created_at.desc()).all()
+        recent_all = db.query(Activity).order_by(Activity.created_at.desc()).all()
+        recent = []
+        for a in recent_all:
+            pr = db.query(Project).filter(Project.id == a.project_id).first()
+            if pr and has_workspace_access(pr.workspace_id, current_user, db):
+                recent.append(a)
 
     activity_list = []
     for a in recent:
@@ -588,16 +757,14 @@ def list_activities(
     return activity_list
 
 
-
 # ─── Smart Search ────────────────────────────────────────────────────────────
 
 @router.get("/search/projects")
 def search_projects(
     q: str = Query("", description="Search query"),
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     request: Request = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Smart Search — delegates to dsa_engine.ProjectSearchIndex."""
     idx = request.app.state.search_index
@@ -619,22 +786,18 @@ def search_projects(
             partial = idx.partial_search(query)
             results = [dict(r) for r in partial]
 
-    # Filter results by role and user visibility
+    # Filter results by role, user visibility, and workspace restrictions
     filtered = []
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
-        gids = {m.group_id for m in mems}
-        for r in results:
-            if r.get("group_id") in gids:
+    for r in results:
+        ws_id = r.get("workspace_id")
+        if ws_id and has_workspace_access(ws_id, current_user, db):
+            if current_user.role == "STUDENT":
+                mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
+                gids = {m.group_id for m in mems}
+                if r.get("group_id") in gids:
+                    filtered.append(r)
+            else:
                 filtered.append(r)
-    elif role == "STAFF" and user_id:
-        workspaces = db.query(Workspace).filter(Workspace.created_by == user_id).all()
-        wids = {w.id for w in workspaces}
-        for r in results:
-            if r.get("workspace_id") in wids:
-                filtered.append(r)
-    else:
-        filtered = results
 
     for r in filtered:
         _enrich(r, db)
@@ -676,31 +839,25 @@ def _enrich(result: dict, db: Session):
 
 @router.get("/progress")
 def get_progress(
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     request: Request = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Retrieve all projects sorted by progress using ProgressBST inorder traversal and filtered by scoping."""
     bst = request.app.state.progress_bst
     results = bst.inorder()
 
-    # Filter based on scoping rules
     filtered = []
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
-        gids = {m.group_id for m in mems}
-        for r in results:
-            if r.get("group_id") in gids:
+    for r in results:
+        ws_id = r.get("workspace_id")
+        if ws_id and has_workspace_access(ws_id, current_user, db):
+            if current_user.role == "STUDENT":
+                mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
+                gids = {m.group_id for m in mems}
+                if r.get("group_id") in gids:
+                    filtered.append(r)
+            else:
                 filtered.append(r)
-    elif role == "STAFF" and user_id:
-        workspaces = db.query(Workspace).filter(Workspace.created_by == user_id).all()
-        wids = {w.id for w in workspaces}
-        for r in results:
-            if r.get("workspace_id") in wids:
-                filtered.append(r)
-    else:
-        filtered = results
 
     for r in filtered:
         _enrich(r, db)
@@ -712,33 +869,26 @@ def get_progress(
 def get_progress_range(
     min: float = Query(0.0, alias="min"),
     max: float = Query(100.0, alias="max"),
-    user_id: Optional[int] = None,
-    role: Optional[str] = None,
     request: Request = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Retrieve projects within a progress range using ProgressBST and filter by role/user visibility."""
     bst = request.app.state.progress_bst
     results = bst.range_search(min, max)
 
-    # Filter based on scoping rules
     filtered = []
-    if role == "STUDENT" and user_id:
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == user_id).all()
-        gids = {m.group_id for m in mems}
-        for r in results:
-            if r.get("group_id") in gids:
+    for r in results:
+        ws_id = r.get("workspace_id")
+        if ws_id and has_workspace_access(ws_id, current_user, db):
+            if current_user.role == "STUDENT":
+                mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
+                gids = {m.group_id for m in mems}
+                if r.get("group_id") in gids:
+                    filtered.append(r)
+            else:
                 filtered.append(r)
-    elif role == "STAFF" and user_id:
-        workspaces = db.query(Workspace).filter(Workspace.created_by == user_id).all()
-        wids = {w.id for w in workspaces}
-        for r in results:
-            if r.get("workspace_id") in wids:
-                filtered.append(r)
-    else:
-        filtered = results
 
-    # Enrich with group name and workspace name
     for r in filtered:
         _enrich(r, db)
 
@@ -752,8 +902,12 @@ def get_review_queue(
     workspace_id: Optional[int] = None,
     request: Request = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Retrieve all pending review requests in FIFO order from the ReviewQueue, filtered by workspace."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     q = request.app.state.review_queue
     raw_items = list(q._items)
     
@@ -763,6 +917,8 @@ def get_review_queue(
         if not proj:
             continue
         if workspace_id and proj.workspace_id != workspace_id:
+            continue
+        if not has_workspace_access(proj.workspace_id, current_user, db):
             continue
         
         grp = db.query(Group).filter(Group.id == proj.group_id).first()
@@ -787,8 +943,12 @@ def get_review_queue_next(
     workspace_id: Optional[int] = None,
     request: Request = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Peek the next pending review request in FIFO order (respecting workspace filtering if provided)."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     q = request.app.state.review_queue
     if q.is_empty():
         return None
@@ -798,6 +958,8 @@ def get_review_queue_next(
         if not proj:
             continue
         if workspace_id and proj.workspace_id != workspace_id:
+            continue
+        if not has_workspace_access(proj.workspace_id, current_user, db):
             continue
         
         grp = db.query(Group).filter(Group.id == proj.group_id).first()
@@ -822,11 +984,24 @@ def submit_review_request(
     body: ReviewRequestCreate,
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Submit a review request and enqueue it."""
     proj = db.query(Project).filter(Project.id == body.project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
+
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if current_user.role == "STUDENT":
+        # must be group member
+        mems = db.query(GroupMembership).filter(
+            GroupMembership.user_id == current_user.id,
+            GroupMembership.group_id == proj.group_id
+        ).first()
+        if not mems:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
     submitter = db.query(User).filter(User.id == body.submitted_by).first()
     if not submitter:
@@ -863,12 +1038,17 @@ def submit_review_request(
 def process_review_request(
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Process (DEQUEUE) the oldest pending review request."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     q = request.app.state.review_queue
     if q.is_empty():
         raise HTTPException(400, "Review queue is empty")
     
+    # We should verify that the staff has access to the workspace of the dequeued item
     item = q.dequeue()
     
     # Update status in DB
@@ -879,4 +1059,232 @@ def process_review_request(
         db.refresh(req)
     
     return {"success": True, "processed_id": item["id"], "request": item}
+
+
+# ─── Workspace Restrictions & Access (Staff Only) ──────────────────────────────────
+
+@router.get("/workspaces/{workspace_id}/access")
+def get_workspace_access(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    
+    access_list = db.query(WorkspaceAccess).filter(WorkspaceAccess.workspace_id == workspace_id).all()
+    allowed_user_ids = [a.user_id for a in access_list if a.user_id is not None]
+    allowed_group_ids = [a.group_id for a in access_list if a.group_id is not None]
+    
+    return {
+        "is_restricted": ws.is_restricted,
+        "allowed_user_ids": allowed_user_ids,
+        "allowed_group_ids": allowed_group_ids
+    }
+
+
+@router.post("/workspaces/{workspace_id}/access")
+def update_workspace_access(
+    workspace_id: int,
+    body: WorkspaceAccessUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    
+    ws.is_restricted = body.is_restricted
+    
+    # Clear existing
+    db.query(WorkspaceAccess).filter(WorkspaceAccess.workspace_id == workspace_id).delete()
+    
+    # Insert new
+    for uid in body.allowed_user_ids:
+        db.add(WorkspaceAccess(workspace_id=workspace_id, user_id=uid))
+    for gid in body.allowed_group_ids:
+        db.add(WorkspaceAccess(workspace_id=workspace_id, group_id=gid))
+        
+    db.commit()
+    return {"success": True}
+
+
+@router.get("/students")
+def list_students(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    students = db.query(User).filter(User.role == "STUDENT").all()
+    return [{"id": s.id, "name": s.name, "user_id": s.user_id, "email": s.email} for s in students]
+
+
+# ─── Grading Scheme Endpoints ─────────────────────────────────────────────────────
+
+@router.get("/workspaces/{workspace_id}/grading-scheme")
+def get_grading_scheme(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not has_workspace_access(workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    scheme = db.query(GradingScheme).filter(GradingScheme.workspace_id == workspace_id).first()
+    if not scheme:
+        return None
+        
+    criteria = db.query(GradingCriterion).filter(GradingCriterion.scheme_id == scheme.id).order_by(GradingCriterion.sort_order, GradingCriterion.id).all()
+    return {
+        "id": scheme.id,
+        "workspace_id": scheme.workspace_id,
+        "created_at": str(scheme.created_at),
+        "criteria": [
+            {
+                "id": c.id,
+                "scheme_id": c.scheme_id,
+                "name": c.name,
+                "description": c.description,
+                "max_marks": c.max_marks,
+                "weight": c.weight,
+                "sort_order": c.sort_order
+            }
+            for c in criteria
+        ]
+    }
+
+
+@router.post("/workspaces/{workspace_id}/grading-scheme")
+def update_grading_scheme(
+    workspace_id: int,
+    body: GradingSchemeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not has_workspace_access(workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    total_weight = 0.0
+    has_weights = False
+    names = set()
+    for c in body.criteria:
+        if not c.name.strip():
+            raise HTTPException(status_code=400, detail="Criterion name cannot be empty")
+        if c.name in names:
+            raise HTTPException(status_code=400, detail="Duplicate criterion names are not allowed")
+        names.add(c.name)
+        if c.max_marks <= 0:
+            raise HTTPException(status_code=400, detail="Maximum marks must be positive")
+        if c.weight is not None:
+            has_weights = True
+            total_weight += c.weight
+            
+    if has_weights and abs(total_weight - 100.0) > 0.01:
+        raise HTTPException(status_code=400, detail="Sum of all criterion weights must equal 100%")
+        
+    scheme = db.query(GradingScheme).filter(GradingScheme.workspace_id == workspace_id).first()
+    if not scheme:
+        scheme = GradingScheme(workspace_id=workspace_id)
+        db.add(scheme)
+        db.flush()
+        
+    db.query(GradingCriterion).filter(GradingCriterion.scheme_id == scheme.id).delete()
+    
+    for idx, c in enumerate(body.criteria):
+        db.add(GradingCriterion(
+            scheme_id=scheme.id,
+            name=c.name,
+            description=c.description,
+            max_marks=c.max_marks,
+            weight=c.weight,
+            sort_order=idx
+        ))
+        
+    db.commit()
+    return {"success": True}
+
+
+# ─── Review Comments Endpoints ───────────────────────────────────────────────────
+
+@router.get("/projects/{project_id}/comments")
+def get_review_comments(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    proj = db.query(Project).filter(Project.project_id == project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(
+            GroupMembership.user_id == current_user.id,
+            GroupMembership.group_id == proj.group_id
+        ).first()
+        if not mems:
+            raise HTTPException(status_code=403, detail="Forbidden")
+            
+    comments = db.query(ReviewComment).filter(ReviewComment.project_id == proj.id).order_by(ReviewComment.created_at.asc()).all()
+    
+    result = []
+    for c in comments:
+        u = db.query(User).filter(User.id == c.user_id).first()
+        result.append({
+            "id": c.id,
+            "project_id": proj.id,
+            "user_id": c.user_id,
+            "user_name": u.name if u else "Unknown",
+            "comment": c.comment,
+            "created_at": str(c.created_at)
+        })
+    return result
+
+
+@router.post("/projects/{project_id}/comments")
+def create_review_comment(
+    project_id: str,
+    body: ReviewCommentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    proj = db.query(Project).filter(Project.project_id == project_id).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    if not has_workspace_access(proj.workspace_id, current_user, db):
+        raise HTTPException(status_code=403, detail="Forbidden")
+        
+    if not body.comment.strip():
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+        
+    comment_record = ReviewComment(
+        project_id=proj.id,
+        user_id=current_user.id,
+        comment=body.comment.strip()
+    )
+    db.add(comment_record)
+    db.commit()
+    
+    return {
+        "id": comment_record.id,
+        "project_id": proj.id,
+        "user_id": current_user.id,
+        "user_name": current_user.name,
+        "comment": comment_record.comment,
+        "created_at": str(comment_record.created_at)
+    }
 

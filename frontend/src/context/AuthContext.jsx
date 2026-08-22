@@ -9,13 +9,22 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const saved = authService.getCurrentUser();
-    if (saved) setUser(saved);
+    if (saved) {
+      if (!saved.token) {
+        authService.logout();
+        setUser(null);
+      } else {
+        setUser(saved);
+      }
+    }
     setLoading(false);
   }, []);
 
   const login = async (email, password) => {
     const res = await authService.login(email, password);
-    if (res.success) setUser(res.user);
+    if (res.success) {
+      setUser({ ...res.user, token: res.token });
+    }
     return res;
   };
 

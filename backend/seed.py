@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 MeshVault Seed Script
 Populates the local SQLite database with coherent development data.

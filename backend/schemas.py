@@ -6,7 +6,7 @@ Validation models for API integration.
 from datetime import datetime, date
 from typing import Optional, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────────
@@ -101,6 +101,16 @@ class ProjectCreate(BaseModel):
     progress: float = 0.0
     deadline: Optional[date] = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if len(v) > 100:
+            raise ValueError("Project name must be 100 characters or less")
+        import re
+        if not re.match(r"^[a-z0-9._-]+$", v):
+            raise ValueError("Project name can only contain lowercase letters, digits, and '.', '_', '-'")
+        return v
+
 
 class ProjectOut(BaseModel):
     id: int
@@ -129,6 +139,17 @@ class ProjectUpdate(BaseModel):
     progress: Optional[float] = None
     deadline: Optional[date] = None
     course: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if len(v) > 100:
+                raise ValueError("Project name must be 100 characters or less")
+            import re
+            if not re.match(r"^[a-z0-9._-]+$", v):
+                raise ValueError("Project name can only contain lowercase letters, digits, and '.', '_', '-'")
+        return v
 
 
 # ─── Milestone ───────────────────────────────────────────────────────────────
@@ -190,6 +211,68 @@ class ReviewRequestOut(BaseModel):
     request_type: str
     message: str
     status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Workspace Access ──────────────────────────────────────────────────────────
+
+class WorkspaceAccessUpdate(BaseModel):
+    is_restricted: bool
+    allowed_user_ids: List[int]
+    allowed_group_ids: List[int]
+
+
+# ─── Grading Scheme ────────────────────────────────────────────────────────────
+
+class GradingCriterionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    max_marks: float
+    weight: Optional[float] = None
+
+
+class GradingCriterionOut(BaseModel):
+    id: int
+    scheme_id: int
+    name: str
+    description: Optional[str]
+    max_marks: float
+    weight: Optional[float]
+    sort_order: int
+
+    class Config:
+        from_attributes = True
+
+
+class GradingSchemeCreate(BaseModel):
+    criteria: List[GradingCriterionCreate]
+
+
+class GradingSchemeOut(BaseModel):
+    id: int
+    workspace_id: int
+    created_at: datetime
+    criteria: List[GradingCriterionOut]
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Review Comments ───────────────────────────────────────────────────────────
+
+class ReviewCommentCreate(BaseModel):
+    comment: str
+
+
+class ReviewCommentOut(BaseModel):
+    id: int
+    project_id: int
+    user_id: int
+    user_name: str
+    comment: str
     created_at: datetime
 
     class Config:

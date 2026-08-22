@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from database import engine, SessionLocal, Base
 from dsa_engine import ProjectSearchIndex, ProgressBST, ReviewQueue
@@ -47,6 +48,22 @@ def _rebuild_dsa_structures() -> None:
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
     Base.metadata.create_all(bind=engine)
+    
+    # Run idempotent SQLite migration for is_restricted
+    db = SessionLocal()
+    try:
+        res = db.execute(text("PRAGMA table_info(workspaces)")).fetchall()
+        columns = [r[1] for r in res]
+        if "is_restricted" not in columns:
+            db.execute(text("ALTER TABLE workspaces ADD COLUMN is_restricted BOOLEAN DEFAULT 0"))
+            db.commit()
+            print("  Migration: Added column 'is_restricted' to 'workspaces' table.")
+    except Exception as e:
+        print(f"  Migration error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
     print()
     print("=" * 50)
     print("  MeshVault Backend Starting")

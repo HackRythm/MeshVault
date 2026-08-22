@@ -1,9 +1,24 @@
-const API_BASE_URL = '';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
+  
+  let token = '';
+  try {
+    const saved = localStorage.getItem('meshvault_session');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      token = parsed.token || '';
+    }
+  } catch {}
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const config = {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...options,
   };
 

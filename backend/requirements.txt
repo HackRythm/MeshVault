@@ -3,3 +3,5 @@ uvicorn[standard]
 sqlalchemy
 pydantic
 bcrypt
+psycopg2-binary
+

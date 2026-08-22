@@ -16,6 +16,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     UniqueConstraint,
+    Boolean,
 )
 from sqlalchemy.orm import relationship
 
@@ -57,6 +58,7 @@ class Workspace(Base):
     description = Column(Text, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    is_restricted = Column(Boolean, default=False, nullable=False)
 
     # Relationships
     creator = relationship("User", back_populates="created_workspaces")
@@ -212,4 +214,79 @@ class ReviewRequest(Base):
 
     def __repr__(self):
         return f"<ReviewRequest id={self.id} project={self.project_id} status={self.status}>"
+
+
+# ─── User Session ────────────────────────────────────────────────────────────
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User")
+
+
+# ─── Workspace Access ──────────────────────────────────────────────────────────
+
+class WorkspaceAccess(Base):
+    __tablename__ = "workspace_access"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
+
+    # Relationships
+    workspace = relationship("Workspace")
+    user = relationship("User")
+    group = relationship("Group")
+
+
+# ─── Grading Scheme ────────────────────────────────────────────────────────────
+
+class GradingScheme(Base):
+    __tablename__ = "grading_schemes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), unique=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    workspace = relationship("Workspace")
+    criteria = relationship("GradingCriterion", back_populates="scheme", cascade="all, delete-orphan")
+
+
+class GradingCriterion(Base):
+    __tablename__ = "grading_criteria"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scheme_id = Column(Integer, ForeignKey("grading_schemes.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    max_marks = Column(Float, nullable=False)
+    weight = Column(Float, nullable=True)
+    sort_order = Column(Integer, default=0)
+
+    # Relationships
+    scheme = relationship("GradingScheme", back_populates="criteria")
+
+
+# ─── Review Comment ───────────────────────────────────────────────────────────
+
+class ReviewComment(Base):
+    __tablename__ = "review_comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    comment = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project")
+    user = relationship("User")
 

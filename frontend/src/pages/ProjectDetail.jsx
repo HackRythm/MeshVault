@@ -20,12 +20,19 @@ export default function ProjectDetail() {
   const [addingMs, setAddingMs] = useState(false);
   const [msError, setMsError] = useState('');
 
-  // Review submission state
+  // Review submission state (Student review request to staff queue)
   const [reqType, setReqType] = useState('Progress Update');
   const [reqMsg, setReqMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState('');
+
+  // Review comments state (Faculty persistent feedback)
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState('');
+  const [loadingComments, setLoadingComments] = useState(true);
+  const [commentsError, setCommentsError] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
 
   useEffect(() => {
     const fetchProjectDetail = async () => {
@@ -40,6 +47,22 @@ export default function ProjectDetail() {
     };
     fetchProjectDetail();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!project) return;
+    const fetchComments = async () => {
+      try {
+        setLoadingComments(true);
+        const data = await projectService.getReviewComments(project.project_id);
+        setComments(data || []);
+      } catch (err) {
+        setCommentsError(err.message || 'Failed to fetch review comments.');
+      } finally {
+        setLoadingComments(false);
+      }
+    };
+    fetchComments();
+  }, [project]);
 
   const handleAddMilestone = async (e) => {
     e.preventDefault();
@@ -93,6 +116,23 @@ export default function ProjectDetail() {
       setSubmitError(err.message || 'Failed to submit review request.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleAddComment = async (e) => {
+    e.preventDefault();
+    if (!newComment.trim()) return;
+
+    setPostingComment(true);
+    setCommentsError('');
+    try {
+      const added = await projectService.addReviewComment(project.project_id, newComment.trim());
+      setComments(prev => [...prev, added]);
+      setNewComment('');
+    } catch (err) {
+      setCommentsError(err.message || 'Failed to post review comment.');
+    } finally {
+      setPostingComment(false);
     }
   };
 
@@ -154,7 +194,7 @@ export default function ProjectDetail() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '32px' }}>
-        {/* Left Column: Description, Milestones */}
+        {/* Left Column: Description, Milestones, Comments */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
           {/* Metadata Grid */}
           <div className="grid grid--4 card card--flat">
@@ -300,6 +340,69 @@ export default function ProjectDetail() {
             ) : (
               <div className="card" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)', borderStyle: 'dashed' }}>
                 No milestones have been established yet.
+              </div>
+            )}
+          </div>
+
+          {/* Project Review Comments */}
+          <div className="detail-section">
+            <h2 className="detail-section__title">Project Review Comments</h2>
+            
+            {commentsError && <div className="login-card__error mb-16">{commentsError}</div>}
+            
+            {loadingComments ? (
+              <LoadingSpinner message="Loading review comments..." />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+                {comments.length > 0 ? (
+                  comments.map(c => (
+                    <div key={c.id} className="card card--flat" style={{ background: 'rgba(255,255,255,0.01)', padding: '16px', border: '1px solid var(--border)' }}>
+                      <div className="flex justify-between items-center mb-8" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="flex items-center gap-8" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div className="member-chip__avatar" style={{ width: '28px', height: '28px', fontSize: '11px', margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {c.user_name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2)}
+                          </div>
+                          <span style={{ fontWeight: '600', fontSize: '13px' }}>{c.user_name}</span>
+                        </div>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {new Date(c.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: 0, whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>
+                        {c.comment}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', borderStyle: 'dashed' }}>
+                    No review comments have been recorded for this project yet.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {user.role === 'STAFF' && (
+              <form onSubmit={handleAddComment} className="card" style={{ background: 'rgba(255,255,255,0.01)', padding: '20px' }}>
+                <h3 className="card__title" style={{ fontSize: '14px', marginBottom: '12px' }}>✍️ Write Review Comment</h3>
+                <div className="form-group">
+                  <textarea
+                    className="form-textarea"
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    required
+                    placeholder="Provide constructive feedback, review notes, or academic comments..."
+                    rows={4}
+                  />
+                </div>
+                <button type="submit" disabled={postingComment} className="btn btn--primary">
+                  {postingComment ? 'Posting Comment...' : 'Submit Review Comment'}
+                </button>
+              </form>
+            )}
+
+            {user.role === 'STUDENT' && (
+              <div className="card" style={{ padding: '16px', background: 'rgba(255,255,255,0.01)', borderStyle: 'dashed', textAlign: 'center' }}>
+                <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>🔒 Comments are read-only for students.</span>
               </div>
             )}
           </div>
