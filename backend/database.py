@@ -8,7 +8,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Read DATABASE_URL from environment (Neon/cloud DB), fallback to local SQLite
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./meshvault.db")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if not DATABASE_URL:
+    if "VERCEL" in os.environ:
+        DATABASE_URL = "sqlite:////tmp/meshvault.db"
+    else:
+        DATABASE_URL = "sqlite:///./meshvault.db"
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
