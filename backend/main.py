@@ -9,7 +9,12 @@ Server:
     http://localhost:8000
 """
 
+import sys
+import os
 from contextlib import asynccontextmanager
+
+# Ensure backend directory is in the import path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
