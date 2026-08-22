@@ -71,7 +71,8 @@ def run_feature_integration_tests():
     # Fetch projects in workspace
     status, body = make_request("/api/projects", token=staff_token)
     assert status == 200
-    proj_id = body[0]["project_id"]
+    # Find a project that the test student belongs to (group_id)
+    proj_id = next(p["project_id"] for p in body if p["group_id"] == group_id)
     print(f"[OK] Found Project ID: {proj_id}")
 
     # --- REQUIREMENT: Existing unrestricted workspace behavior still works ---
@@ -197,6 +198,126 @@ def run_feature_integration_tests():
         "allowed_group_ids": []
     })
     assert status == 200
+
+    # ─── Phase 1 Group & Project Architecture Tests ─────────────────────────────
+    print("\n[Phase 1] Executing Student Groups & Projects architecture tests...")
+
+    # Log in Student 2 (Maya Johnson)
+    status, body = make_request("/api/auth/login", method="POST", data={
+        "email": "maya.johnson@university.edu",
+        "password": "student123"
+    })
+    assert status == 200
+    student2_token = body["token"]
+    student2_id = body["user"]["id"]
+    print("[OK] Student 2 (Maya) authenticated successfully.")
+
+    # 1. Student creates Group
+    group_code = f"GP-X1-{int(time.time())}"
+    new_group = {
+        "name": "Group X1",
+        "code": group_code,
+        "description": "Independent study on advanced database engines."
+    }
+    status, body = make_request("/api/groups", method="POST", data=new_group, token=student_token)
+    assert status == 201
+    group_id = body["id"]
+    print("[OK] Student 1 (Alex) created Group successfully.")
+
+    # 2. Creator becomes Leader
+    status, body = make_request(f"/api/groups/{group_id}", token=student_token)
+    assert status == 200
+    assert body["is_leader"] is True
+    leaders = [m for m in body["members"] if m["is_leader"]]
+    assert any(m["id"] == student_id for m in leaders)
+    print("[OK] Group creator automatically becomes leader.")
+
+    # 3. Another Student joins using Group Code
+    status, body = make_request("/api/groups/join", method="POST", data={"code": group_code}, token=student2_token)
+    assert status == 200
+    print("[OK] Another student (Maya) joined group successfully using code.")
+
+    # Verify Maya is ordinary member (not leader)
+    status, body = make_request(f"/api/groups/{group_id}", token=student2_token)
+    assert status == 200
+    assert body["is_leader"] is False
+    assert any(m["id"] == student2_id for m in body["members"])
+    print("[OK] Joined student is initially an ordinary member.")
+
+    # 6. Ordinary member cannot promote members
+    status, body = make_request(f"/api/groups/{group_id}/promote", method="POST", data={"user_id": student2_id}, token=student2_token)
+    assert status == 403
+    print("[OK] Ordinary member cannot promote members (returns 403).")
+
+    # 5. Leader can promote another member
+    status, body = make_request(f"/api/groups/{group_id}/promote", method="POST", data={"user_id": student2_id}, token=student_token)
+    assert status == 200
+    print("[OK] Leader successfully promoted member to leader.")
+
+    # 4. Multiple Leaders can exist
+    status, body = make_request(f"/api/groups/{group_id}", token=student2_token)
+    assert status == 200
+    assert body["is_leader"] is True
+    print("[OK] Group can successfully have multiple leaders.")
+
+    # 9. Group can contain projects (ordinary member creates it)
+    # Using a dynamic project ID to prevent conflict
+    project_id_val = f"test-project-x1-{int(time.time())}"
+    new_project = {
+        "project_id": project_id_val,
+        "name": "test-project-x1-name",
+        "description": "Phase 1 independent test project.",
+        "group_id": group_id,
+        "priority": "HIGH"
+    }
+    status, body = make_request("/api/projects", method="POST", data=new_project, token=student2_token)
+    assert status == 201
+    print("[OK] Group member can create a project successfully.")
+
+    # 10. Group remains independent of Workspace (workspace_id is None)
+    assert body["workspace_id"] is None
+    print("[OK] Created project has no workspace association (independent).")
+
+    # 8. Group can contain multiple projects
+    project_id_val2 = f"test-project-x2-{int(time.time())}"
+    new_project2 = {
+        "project_id": project_id_val2,
+        "name": "test-project-x2-name",
+        "description": "Second test project in group.",
+        "group_id": group_id,
+        "priority": "LOW"
+    }
+    status, body = make_request("/api/projects", method="POST", data=new_project2, token=student_token)
+    assert status == 201
+    print("[OK] Group can contain multiple projects successfully.")
+
+    # Log in Student 3 (Ryan Patel)
+    status, body = make_request("/api/auth/login", method="POST", data={
+        "email": "ryan.patel@university.edu",
+        "password": "student123"
+    })
+    assert status == 200
+    student3_token = body["token"]
+    student3_id = body["user"]["id"]
+
+    # Ryan joins group
+    status, body = make_request("/api/groups/join", method="POST", data={"code": group_code}, token=student3_token)
+    assert status == 200
+
+    # 7. Ordinary member cannot delete projects
+    status, body = make_request(f"/api/projects/{project_id_val}", method="DELETE", token=student3_token)
+    assert status == 403
+    print("[OK] Ordinary member cannot delete projects (returns 403).")
+
+    # 8. Leader can delete projects
+    status, body = make_request(f"/api/projects/{project_id_val}", method="DELETE", token=student_token)
+    assert status == 200
+    print("[OK] Leader can delete projects successfully.")
+
+    # Cleanup: Delete test group
+    status, body = make_request(f"/api/groups/{group_id}", method="DELETE", token=student_token)
+    assert status == 200
+    print("[OK] Group cleaned up successfully.")
 
     print("\n==================================================")
     print("  ALL FEATURE INTEGRATION TESTS PASSED SUCCESSFULLY!")

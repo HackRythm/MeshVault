@@ -79,9 +79,11 @@ class Group(Base):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
+    code = Column(String(50), unique=True, nullable=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -103,6 +105,7 @@ class GroupMembership(Base):
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_leader = Column(Boolean, default=False, nullable=False)
     joined_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -129,7 +132,7 @@ class Project(Base):
     project_id = Column(String(50), unique=True, nullable=False, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=False)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id"), nullable=True)
     group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
     course = Column(String(100), nullable=True)
     status = Column(String(30), nullable=False, default="NOT_STARTED")

@@ -16,9 +16,10 @@ from models import (
     User, Workspace, Group, GroupMembership, Project, Milestone, Activity, ReviewRequest,
     UserSession, WorkspaceAccess, GradingScheme, GradingCriterion, ReviewComment
 )
+from pydantic import BaseModel
 from schemas import (
     LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate,
-    WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate
+    WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate, GroupCreate, GroupJoinRequest
 )
 from auth import authenticate_user
 
@@ -248,13 +249,17 @@ def get_workspace(
 
 # ─── Groups ─────────────────────────────────────────────────────────────────
 
+class PromoteRequest(BaseModel):
+    user_id: int
+
+
 @router.get("/groups")
 def list_groups(
     workspace_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List groups — optionally filtered by workspace or user role."""
+    """List groups — role-aware scoping and optional workspace filtering."""
     if workspace_id and not has_workspace_access(workspace_id, current_user, db):
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -269,17 +274,235 @@ def list_groups(
     groups = query.all()
     result = []
     for g in groups:
-        if has_workspace_access(g.workspace_id, current_user, db):
+        if not g.workspace_id or has_workspace_access(g.workspace_id, current_user, db):
+            membership = db.query(GroupMembership).filter(
+                GroupMembership.group_id == g.id,
+                GroupMembership.user_id == current_user.id
+            ).first()
+            
             result.append({
                 "id": g.id,
                 "workspace_id": g.workspace_id,
                 "name": g.name,
                 "description": g.description,
+                "code": g.code,
+                "created_by": g.created_by,
                 "created_at": str(g.created_at),
+                "is_leader": membership.is_leader if membership else False,
                 "member_count": db.query(GroupMembership).filter(GroupMembership.group_id == g.id).count(),
                 "project_count": db.query(Project).filter(Project.group_id == g.id).count(),
             })
     return result
+
+
+@router.post("/groups", status_code=201)
+def create_group(
+    body: GroupCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new group (creator becomes leader)."""
+    # Check if code already exists
+    existing = db.query(Group).filter(Group.code == body.code).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Group join code already exists. Please choose a different one.")
+
+    grp = Group(
+        name=body.name,
+        code=body.code,
+        description=body.description,
+        created_by=current_user.id
+    )
+    db.add(grp)
+    db.commit()
+    db.refresh(grp)
+
+    # Automatically add creator as a leader
+    membership = GroupMembership(
+        group_id=grp.id,
+        user_id=current_user.id,
+        is_leader=True
+    )
+    db.add(membership)
+    db.commit()
+
+    return {
+        "id": grp.id,
+        "name": grp.name,
+        "code": grp.code,
+        "description": grp.description,
+        "created_by": grp.created_by,
+        "created_at": str(grp.created_at)
+    }
+
+
+@router.post("/groups/join")
+def join_group(
+    body: GroupJoinRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Join an existing group using its code."""
+    grp = db.query(Group).filter(Group.code == body.code).first()
+    if not grp:
+        raise HTTPException(status_code=404, detail="Group not found with the provided code.")
+
+    # Check if already a member
+    existing = db.query(GroupMembership).filter(
+        GroupMembership.group_id == grp.id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="You are already a member of this group.")
+
+    membership = GroupMembership(
+        group_id=grp.id,
+        user_id=current_user.id,
+        is_leader=False
+    )
+    db.add(membership)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Successfully joined group: {grp.name}",
+        "group_id": grp.id
+    }
+
+
+@router.post("/groups/{group_id}/promote")
+def promote_member(
+    group_id: int,
+    body: PromoteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Promote a member to group leader (Leaders only)."""
+    # Verify current user is a leader
+    caller_membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if not caller_membership or not caller_membership.is_leader:
+        raise HTTPException(status_code=403, detail="Forbidden: Only group leaders can promote members.")
+
+    # Verify target is a member
+    target_membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == body.user_id
+    ).first()
+    if not target_membership:
+        raise HTTPException(status_code=404, detail="Target user is not a member of this group.")
+
+    target_membership.is_leader = True
+    db.commit()
+
+    return {"success": True, "message": "User promoted to leader successfully."}
+
+
+@router.delete("/groups/{group_id}/members/{user_id}")
+def remove_member(
+    group_id: int,
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove a member from the group (Leaders only, or user leaving themselves)."""
+    # Fetch caller membership
+    caller_membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+
+    if not caller_membership:
+        raise HTTPException(status_code=403, detail="Forbidden: You are not a member of this group.")
+
+    # Permission check:
+    # 1. User is leaving themselves
+    # 2. User is a leader removing someone else
+    is_self = (user_id == current_user.id)
+    is_leader = caller_membership.is_leader
+
+    if not is_self and not is_leader:
+        raise HTTPException(status_code=403, detail="Forbidden: Only leaders can remove other members.")
+
+    # Fetch target membership
+    target_membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == user_id
+    ).first()
+    if not target_membership:
+        raise HTTPException(status_code=404, detail="Member not found in this group.")
+
+    # If a leader is leaving, check if they are the last leader and there are other members
+    if is_self and is_leader:
+        other_leaders = db.query(GroupMembership).filter(
+            GroupMembership.group_id == group_id,
+            GroupMembership.user_id != user_id,
+            GroupMembership.is_leader == True
+        ).count()
+        other_members = db.query(GroupMembership).filter(
+            GroupMembership.group_id == group_id,
+            GroupMembership.user_id != user_id
+        ).count()
+        if other_members > 0 and other_leaders == 0:
+            raise HTTPException(status_code=400, detail="Cannot leave: You are the last leader. Promote another member first.")
+
+    db.delete(target_membership)
+    db.commit()
+
+    # If the group has no members left, delete the group entirely
+    remaining = db.query(GroupMembership).filter(GroupMembership.group_id == group_id).count()
+    if remaining == 0:
+        grp = db.query(Group).filter(Group.id == group_id).first()
+        if grp:
+            # Delete all projects belonging to the group
+            projects = db.query(Project).filter(Project.group_id == group_id).all()
+            for p in projects:
+                p_data = _project_dict(p)
+                db.delete(p)
+                request.app.state.search_index.remove_project(p.project_id)
+                request.app.state.progress_bst.delete(p_data)
+            db.delete(grp)
+            db.commit()
+
+    return {"success": True, "message": "Member removed/left successfully."}
+
+
+@router.delete("/groups/{group_id}")
+def delete_group(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a group entirely (Leaders only)."""
+    membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if not membership or not membership.is_leader:
+        raise HTTPException(status_code=403, detail="Forbidden: Only leaders can delete the group.")
+
+    grp = db.query(Group).filter(Group.id == group_id).first()
+    if not grp:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    # Delete all projects belonging to the group
+    projects = db.query(Project).filter(Project.group_id == group_id).all()
+    for p in projects:
+        p_data = _project_dict(p)
+        db.delete(p)
+        request.app.state.search_index.remove_project(p.project_id)
+        request.app.state.progress_bst.delete(p_data)
+
+    # Delete all memberships
+    db.query(GroupMembership).filter(GroupMembership.group_id == group_id).delete()
+
+    db.delete(grp)
+    db.commit()
+    return {"success": True, "message": "Group deleted successfully."}
 
 
 @router.get("/groups/{group_id}")
@@ -293,28 +516,41 @@ def get_group(
     if not grp:
         raise HTTPException(404, "Group not found")
 
-    if not has_workspace_access(grp.workspace_id, current_user, db):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    # Check permission: student must be in this group
+    membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if current_user.role == "STUDENT" and not membership:
+        raise HTTPException(status_code=403, detail="Forbidden: You are not a member of this group.")
 
     mems = db.query(GroupMembership).filter(GroupMembership.group_id == group_id).all()
     members = []
     for m in mems:
         u = db.query(User).filter(User.id == m.user_id).first()
         if u:
-            members.append({"id": u.id, "name": u.name, "email": u.email, "user_id": u.user_id})
+            members.append({
+                "id": u.id,
+                "name": u.name,
+                "email": u.email,
+                "user_id": u.user_id,
+                "is_leader": m.is_leader
+            })
 
     projects = db.query(Project).filter(Project.group_id == group_id).all()
     project_list = [_project_dict(p) for p in projects]
 
-    ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first()
+    ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first() if grp.workspace_id else None
 
     return {
         "id": grp.id,
         "workspace_id": grp.workspace_id,
         "workspace_name": ws.name if ws else "",
         "name": grp.name,
+        "code": grp.code,
         "description": grp.description,
         "created_at": str(grp.created_at),
+        "is_leader": membership.is_leader if (membership and current_user.role == "STUDENT") else False,
         "members": members,
         "projects": project_list,
     }
@@ -348,9 +584,9 @@ def list_projects(
     projects = query.order_by(Project.created_at.desc()).all()
     result = []
     for p in projects:
-        if has_workspace_access(p.workspace_id, current_user, db):
+        if not p.workspace_id or has_workspace_access(p.workspace_id, current_user, db):
             grp = db.query(Group).filter(Group.id == p.group_id).first()
-            ws = db.query(Workspace).filter(Workspace.id == p.workspace_id).first()
+            ws = db.query(Workspace).filter(Workspace.id == p.workspace_id).first() if p.workspace_id else None
             d = _project_dict(p, grp)
             d["workspace_name"] = ws.name if ws else ""
             result.append(d)
@@ -365,16 +601,28 @@ def create_project(
     current_user: User = Depends(get_current_user),
 ):
     """Create a project — validates unique project_id."""
-    if current_user.role != "STAFF":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not has_workspace_access(body.workspace_id, current_user, db):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: Only students can create projects.")
+
+    # Student must belong to the group
+    membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == body.group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="Forbidden: You are not a member of this group.")
 
     if db.query(Project).filter(Project.project_id == body.project_id).first():
         raise HTTPException(409, "Project ID already exists")
-    ws = db.query(Workspace).filter(Workspace.id == body.workspace_id).first()
-    if not ws:
-        raise HTTPException(404, "Workspace not found")
+
+    ws = None
+    if body.workspace_id:
+        ws = db.query(Workspace).filter(Workspace.id == body.workspace_id).first()
+        if not ws:
+            raise HTTPException(404, "Workspace not found")
+        if not has_workspace_access(body.workspace_id, current_user, db):
+            raise HTTPException(status_code=403, detail="Forbidden: No access to this workspace.")
+
     grp = db.query(Group).filter(Group.id == body.group_id).first()
     if not grp:
         raise HTTPException(404, "Group not found")
@@ -395,11 +643,21 @@ def create_project(
     db.commit()
     db.refresh(project)
 
+    # Log activity
+    act = Activity(
+        project_id=project.id,
+        user_id=current_user.id,
+        activity_type="PROJECT_CREATED",
+        message=f"Project '{project.name}' was created."
+    )
+    db.add(act)
+    db.commit()
+
     # Update search index
     request.app.state.search_index.add_project(project)
 
     d = _project_dict(project, grp)
-    d["workspace_name"] = ws.name
+    d["workspace_name"] = ws.name if ws else ""
 
     # Update Progress BST
     request.app.state.progress_bst.insert(dict(d))
@@ -418,10 +676,10 @@ def get_project(
     if not proj:
         raise HTTPException(404, "Project not found")
 
-    if not has_workspace_access(proj.workspace_id, current_user, db):
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    if current_user.role == "STUDENT":
+    if proj.workspace_id:
+        if not has_workspace_access(proj.workspace_id, current_user, db):
+            raise HTTPException(status_code=403, detail="Forbidden")
+    elif current_user.role == "STUDENT":
         mems = db.query(GroupMembership).filter(
             GroupMembership.user_id == current_user.id,
             GroupMembership.group_id == proj.group_id
@@ -430,7 +688,7 @@ def get_project(
             raise HTTPException(status_code=403, detail="Forbidden")
 
     grp = db.query(Group).filter(Group.id == proj.group_id).first()
-    ws = db.query(Workspace).filter(Workspace.id == proj.workspace_id).first()
+    ws = db.query(Workspace).filter(Workspace.id == proj.workspace_id).first() if proj.workspace_id else None
 
     milestones = db.query(Milestone).filter(Milestone.project_id == proj.id).all()
     milestone_list = [
@@ -492,16 +750,19 @@ def update_project(
     if not proj:
         raise HTTPException(404, "Project not found")
 
-    if not has_workspace_access(proj.workspace_id, current_user, db):
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-    if current_user.role == "STUDENT":
-        mems = db.query(GroupMembership).filter(
-            GroupMembership.user_id == current_user.id,
-            GroupMembership.group_id == proj.group_id
-        ).first()
-        if not mems:
+    if proj.workspace_id:
+        if not has_workspace_access(proj.workspace_id, current_user, db):
             raise HTTPException(status_code=403, detail="Forbidden")
+
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: Only students can edit projects.")
+
+    mems = db.query(GroupMembership).filter(
+        GroupMembership.user_id == current_user.id,
+        GroupMembership.group_id == proj.group_id
+    ).first()
+    if not mems:
+        raise HTTPException(status_code=403, detail="Forbidden: You are not a member of this group.")
 
     old_project_data = _project_dict(proj)
 
@@ -537,16 +798,20 @@ def delete_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a project and remove it from search index and Progress BST."""
+    """Delete a project and remove it from search index and Progress BST (Leaders only)."""
     proj = db.query(Project).filter(Project.project_id == project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
 
-    if current_user.role != "STAFF":
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: Only students can delete projects.")
 
-    if not has_workspace_access(proj.workspace_id, current_user, db):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    membership = db.query(GroupMembership).filter(
+        GroupMembership.group_id == proj.group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if not membership or not membership.is_leader:
+        raise HTTPException(status_code=403, detail="Forbidden: Only group leaders can delete projects.")
 
     project_data = _project_dict(proj)
 

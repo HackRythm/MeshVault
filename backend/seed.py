@@ -101,6 +101,8 @@ def seed():
                 workspace_id=workspace.id,
                 name=name,
                 description=desc,
+                code=f"GP-{name.upper().replace(' ', '')}",
+                created_by=students[0].id,
             )
             db.add(group)
             groups.append(group)
@@ -118,8 +120,10 @@ def seed():
             (groups[2].id, students[5].id),  # Priya  → Gamma
         ]
 
-        for gid, uid in membership_pairs:
-            db.add(GroupMembership(group_id=gid, user_id=uid))
+        for idx, (gid, uid) in enumerate(membership_pairs):
+            # Make the first student in each pair (even indices) a leader
+            is_leader = (idx % 2 == 0)
+            db.add(GroupMembership(group_id=gid, user_id=uid, is_leader=is_leader))
 
         db.flush()
         print(f"  [Members] {len(membership_pairs)} group memberships created")

@@ -104,7 +104,7 @@ def run_tests():
     print(f"  Projects: {[p['name'] for p in body['projects']]}")
     assert status == 200
     
-    # 7. Project Creation (Staff only, student would fail but here we test backend success)
+    # 7. Project Creation (Student creates project under their group)
     proj_id = "AID-DSA-G11-01"
     new_proj = {
         "project_id": proj_id,
@@ -118,14 +118,14 @@ def run_tests():
         "progress": 20.0,
         "deadline": "2026-09-30"
     }
-    status, body = make_request("/api/projects", method="POST", data=new_proj, token=staff_token)
+    status, body = make_request("/api/projects", method="POST", data=new_proj, token=student_token)
     print(f"\n[POST /api/projects] Create: {status}")
     print(body)
     # Check if already exists or successfully created
     assert status in (201, 409)
     
     # Verify duplicate Project ID error
-    status_dup, body_dup = make_request("/api/projects", method="POST", data=new_proj, token=staff_token)
+    status_dup, body_dup = make_request("/api/projects", method="POST", data=new_proj, token=student_token)
     print(f"[POST /api/projects] Duplicate Check: {status_dup}")
     print(body_dup)
     assert status_dup == 409

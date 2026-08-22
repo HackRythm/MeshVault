@@ -71,16 +71,18 @@ class WorkspaceOut(BaseModel):
 # ─── Group ───────────────────────────────────────────────────────────────────
 
 class GroupCreate(BaseModel):
-    workspace_id: int
     name: str
+    code: str
     description: Optional[str] = None
 
 
 class GroupOut(BaseModel):
     id: int
-    workspace_id: int
+    workspace_id: Optional[int] = None
     name: str
     description: Optional[str]
+    code: Optional[str] = None
+    created_by: Optional[int] = None
     created_at: datetime
 
     class Config:
@@ -93,7 +95,7 @@ class ProjectCreate(BaseModel):
     project_id: str  # Manually entered by the user
     name: str
     description: Optional[str] = None
-    workspace_id: int
+    workspace_id: Optional[int] = None
     group_id: int
     course: Optional[str] = None
     status: str = "NOT_STARTED"
@@ -117,7 +119,7 @@ class ProjectOut(BaseModel):
     project_id: str
     name: str
     description: Optional[str]
-    workspace_id: int
+    workspace_id: Optional[int]
     group_id: int
     course: Optional[str]
     status: str
@@ -277,4 +279,9 @@ class ReviewCommentOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class GroupJoinRequest(BaseModel):
+    code: str
+
 

@@ -12,6 +12,26 @@ const groupService = {
   async getGroup(id) {
     return api.get(`/api/groups/${id}`);
   },
+
+  async createGroup(name, code, description) {
+    return api.post('/api/groups', { name, code, description });
+  },
+
+  async joinGroup(code) {
+    return api.post('/api/groups/join', { code });
+  },
+
+  async promoteToLeader(groupId, userId) {
+    return api.post(`/api/groups/${groupId}/promote`, { user_id: userId });
+  },
+
+  async removeMember(groupId, userId) {
+    return api.delete(`/api/groups/${groupId}/members/${userId}`);
+  },
+
+  async deleteGroup(groupId) {
+    return api.delete(`/api/groups/${groupId}`);
+  }
 };
 
 export default groupService;
