@@ -1515,8 +1515,8 @@ def get_dashboard(
             else:
                 projects = []
         else:
-            # Staff with no workspaces yet: show all projects as global view
-            projects = db.query(Project).all()
+            # Staff with no workspaces yet: nothing is assigned yet
+            projects = []
 
         # Groups and students from staff's workspaces
         if my_ws_ids:
@@ -1529,8 +1529,9 @@ def get_dashboard(
             for gid in wg_group_ids:
                 total_students += db.query(GroupMembership).filter(GroupMembership.group_id == gid).count()
         else:
-            total_groups = db.query(Group).count()
-            total_students = db.query(User).filter(User.role == "STUDENT").count()
+            # Staff with no workspaces yet: nothing is assigned yet
+            total_groups = 0
+            total_students = 0
 
     total_projects = len(projects)
     active_projects = sum(1 for p in projects if p.status == "IN_PROGRESS")

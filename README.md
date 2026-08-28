@@ -127,3 +127,10 @@ Use the following credentials to log in to MeshVault:
 | **Student** | `ryan.patel@university.edu` | `student123` | Alternative student account. |
 
 *(Students STU-001 through STU-006 are all initialized with the password `student123`.)*
+
+---
+
+## 📋 Changelog
+
+### v1.1.0 — Dashboard Stats Accuracy Fix
+*   **Bug Fix**: Staff dashboard stats (`Total Assigned Groups`, `Total Students Registered`, `Total Projects Tracked`, `Active Projects`) now correctly start at **0** for a newly registered staff account with no workspaces. Previously, staff accounts with no workspaces incorrectly showed global database totals (all groups, all students, all projects) as a fallback, which was misleading. Stats now only reflect data scoped to the staff member's own workspaces.
