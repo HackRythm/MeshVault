@@ -113,6 +113,33 @@ const projectService = {
       data
     );
   },
+
+  // ─── Per-Student Grading Methods ─────────────────────────────────────────────
+
+  /** List all student grades (full history, all students). Faculty only. */
+  async getStudentGrades(workspaceId, projectId) {
+    return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/student-grades`);
+  },
+
+  /** Submit an append-only grade for one student. Faculty only. */
+  async submitStudentGrade(workspaceId, projectId, data) {
+    return api.post(
+      `/api/workspaces/${workspaceId}/projects/${projectId}/student-grades`,
+      data
+    );
+  },
+
+  /** Release a specific student grade record. Faculty only. */
+  async releaseStudentGrade(workspaceId, projectId, gradeId) {
+    return api.post(
+      `/api/workspaces/${workspaceId}/projects/${projectId}/student-grades/${gradeId}/release`
+    );
+  },
+
+  /** Get current student's own released grades. Student only. */
+  async getMyGrade(workspaceId, projectId) {
+    return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/my-grade`);
+  },
 };
 
 export default projectService;

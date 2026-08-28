@@ -6,6 +6,8 @@ import projectService from '../services/projectService';
 import workspaceService from '../services/workspaceService';
 import { useAuth } from '../context/AuthContext';
 
+import StudentGradingPanel from '../components/StudentGradingPanel';
+
 export default function ReviewQueue() {
   const { user } = useAuth();
   const [workspaces, setWorkspaces] = useState([]);
@@ -145,7 +147,19 @@ export default function ReviewQueue() {
                   <p style={{ fontSize: '13px', lineHeight: '1.5' }}>{nextRequest.message}</p>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {/* Individual Student Grading Panel */}
+                {selectedWs && (
+                  <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border)' }}>
+                    <StudentGradingPanel
+                      workspaceId={selectedWs.id}
+                      projectId={nextRequest.project_id}
+                      groupName={nextRequest.group_name}
+                      members={nextRequest.members || []}
+                    />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
                   <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Submitted by: <strong>{nextRequest.submitted_by}</strong></span>
                   <button
                     className="btn btn--primary"

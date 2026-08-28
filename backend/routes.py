@@ -15,13 +15,14 @@ from database import get_db
 from models import (
     User, Workspace, Group, GroupMembership, Project, Milestone, Activity, ReviewRequest,
     UserSession, WorkspaceAccess, GradingScheme, GradingCriterion, ReviewComment,
-    WorkspaceGroup, WorkspaceProject, ProjectEvaluation
+    WorkspaceGroup, WorkspaceProject, ProjectEvaluation, StudentGrade
 )
 from pydantic import BaseModel
 from schemas import (
     LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate,
     WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate, GroupCreate, GroupJoinRequest,
-    WorkspaceJoinRequest, WorkspaceRequestProcess, DirectRemovalRequest, EvaluationCreate
+    WorkspaceJoinRequest, WorkspaceRequestProcess, DirectRemovalRequest, EvaluationCreate,
+    StudentGradeCreate
 )
 from auth import authenticate_user
 
@@ -1894,28 +1895,48 @@ def get_review_queue_next(
             WorkspaceProject.status == "APPROVED"
         ).all()
         visible = False
+        matched_ws_id = None
         for wp in wps:
             if workspace_id and wp.workspace_id != workspace_id:
                 continue
             if has_workspace_access(wp.workspace_id, current_user, db):
                 visible = True
+                matched_ws_id = wp.workspace_id
                 break
         if not visible:
             continue
         
         grp = db.query(Group).filter(Group.id == proj.group_id).first()
         submitter = db.query(User).filter(User.id == item["submitted_by"]).first()
-        
+
+        # Include group members for the grading drill-down
+        members_raw = db.query(GroupMembership).filter(GroupMembership.group_id == proj.group_id).all()
+        members = []
+        for m in members_raw:
+            u = db.query(User).filter(User.id == m.user_id).first()
+            if u:
+                members.append({
+                    "id": u.id,
+                    "name": u.name,
+                    "user_id": u.user_id,
+                    "email": u.email,
+                    "is_leader": m.is_leader,
+                })
+
         return {
             "id": item["id"],
             "project_id": proj.project_id,
+            "project_internal_id": proj.id,
             "project_name": proj.name,
+            "group_id": proj.group_id,
             "group_name": grp.name if grp else "N/A",
+            "workspace_id": matched_ws_id,
             "submitted_by": submitter.name if submitter else "Unknown",
             "request_type": item["request_type"],
             "message": item["message"],
             "status": item["status"],
             "created_at": item["created_at"],
+            "members": members,
         }
     return None
 
@@ -2509,6 +2530,191 @@ def get_latest_evaluation(
         "criterion_scores": ev.criterion_scores,
         "created_at": str(ev.created_at),
     }
+
+
+# ─── Per-Student Grading (Append-Only) ─────────────────────────────────────────
+
+def _student_grade_out(sg, db) -> dict:
+    """Serialize a StudentGrade record."""
+    student = db.query(User).filter(User.id == sg.student_id).first()
+    evaluator = db.query(User).filter(User.id == sg.evaluator_id).first()
+    return {
+        "id": sg.id,
+        "workspace_id": sg.workspace_id,
+        "project_id": sg.project_id,
+        "student_id": sg.student_id,
+        "student_name": student.name if student else "Unknown",
+        "student_user_id": student.user_id if student else "",
+        "evaluator_id": sg.evaluator_id,
+        "evaluator_name": evaluator.name if evaluator else "Unknown",
+        "criterion_scores": sg.criterion_scores,
+        "total_score": sg.total_score,
+        "max_score": sg.max_score,
+        "notes": sg.notes,
+        "is_released": sg.is_released,
+        "released_at": str(sg.released_at) if sg.released_at else None,
+        "created_at": str(sg.created_at),
+    }
+
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/student-grades")
+def list_student_grades(
+    workspace_id: int,
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List ALL student grades (full history, all students). Staff only."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden: students cannot view all grades")
+
+    ws, proj = _verify_ws_project_access(workspace_id, project_id, current_user, db)
+
+    grades = (
+        db.query(StudentGrade)
+        .filter(
+            StudentGrade.workspace_id == workspace_id,
+            StudentGrade.project_id == proj.id,
+        )
+        .order_by(StudentGrade.student_id, StudentGrade.created_at.desc())
+        .all()
+    )
+    return [_student_grade_out(g, db) for g in grades]
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/student-grades", status_code=201)
+def create_student_grade(
+    workspace_id: int,
+    project_id: str,
+    body: StudentGradeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Append a new grade for one student. Staff only. Append-only — never modifies
+    existing records. New grades always default to is_released=False."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden: only staff can grade students")
+
+    ws, proj = _verify_ws_project_access(workspace_id, project_id, current_user, db)
+
+    # Verify staff owns the workspace
+    if ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden: not the workspace host")
+
+    # Verify student belongs to the project's group (group isolation)
+    mem = db.query(GroupMembership).filter(
+        GroupMembership.user_id == body.student_id,
+        GroupMembership.group_id == proj.group_id,
+    ).first()
+    if not mem:
+        raise HTTPException(status_code=400, detail="Student is not a member of this project's group")
+
+    # Validate scores
+    if body.total_score < 0:
+        raise HTTPException(status_code=400, detail="Score cannot be negative")
+    if body.max_score <= 0:
+        raise HTTPException(status_code=400, detail="Max score must be positive")
+    if body.total_score > body.max_score:
+        raise HTTPException(status_code=400, detail="Score cannot exceed max score")
+
+    criterion_json = None
+    if body.criterion_scores:
+        criterion_json = _json.dumps([cs.dict() for cs in body.criterion_scores])
+
+    grade = StudentGrade(
+        workspace_id=workspace_id,
+        project_id=proj.id,
+        student_id=body.student_id,
+        evaluator_id=current_user.id,
+        criterion_scores=criterion_json,
+        total_score=body.total_score,
+        max_score=body.max_score,
+        notes=body.notes,
+        is_released=False,  # Always starts unreleased
+    )
+    db.add(grade)
+    db.commit()
+    db.refresh(grade)
+
+    return _student_grade_out(grade, db)
+
+
+@router.post("/workspaces/{workspace_id}/projects/{project_id}/student-grades/{grade_id}/release")
+def release_student_grade(
+    workspace_id: int,
+    project_id: str,
+    grade_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Release ONE specific grade record for a student. Staff only.
+    Only sets is_released=True on this record. Does NOT modify any other records."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ws, proj = _verify_ws_project_access(workspace_id, project_id, current_user, db)
+
+    if ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden: not the workspace host")
+
+    grade = db.query(StudentGrade).filter(
+        StudentGrade.id == grade_id,
+        StudentGrade.workspace_id == workspace_id,
+        StudentGrade.project_id == proj.id,
+    ).first()
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade record not found")
+
+    if grade.is_released:
+        return {"success": True, "message": "Already released"}
+
+    grade.is_released = True
+    grade.released_at = datetime.utcnow()
+    db.commit()
+    db.refresh(grade)
+
+    return {"success": True, "grade": _student_grade_out(grade, db)}
+
+
+@router.get("/workspaces/{workspace_id}/projects/{project_id}/my-grade")
+def get_my_grade(
+    workspace_id: int,
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Student: fetch own released grades only. Enforces:
+    1. Must be STUDENT role
+    2. Must be member of project's group (group isolation)
+    3. Only returns records where student_id = current_user.id AND is_released = True
+    """
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: staff should use the full grades endpoint")
+
+    ws, proj = _verify_ws_project_access(workspace_id, project_id, current_user, db)
+
+    # Group isolation: _verify_ws_project_access already checks group membership for students
+    # Additional explicit check for clarity
+    mem = db.query(GroupMembership).filter(
+        GroupMembership.user_id == current_user.id,
+        GroupMembership.group_id == proj.group_id,
+    ).first()
+    if not mem:
+        raise HTTPException(status_code=403, detail="Forbidden: not a member of this project's group")
+
+    # Only return THIS student's released grades — never another student's
+    grades = (
+        db.query(StudentGrade)
+        .filter(
+            StudentGrade.workspace_id == workspace_id,
+            StudentGrade.project_id == proj.id,
+            StudentGrade.student_id == current_user.id,
+            StudentGrade.is_released == True,
+        )
+        .order_by(StudentGrade.created_at.desc())
+        .all()
+    )
+    return [_student_grade_out(g, db) for g in grades]
 
 
 @router.get("/workspaces/{workspace_id}/projects/{project_id}")

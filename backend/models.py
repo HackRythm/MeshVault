@@ -383,3 +383,43 @@ class ProjectEvaluation(Base):
     evaluator = relationship("User")
     grading_scheme = relationship("GradingScheme")
 
+
+# ─── Student Grade (Per-Student, Append-Only) ─────────────────────────────────
+
+class StudentGrade(Base):
+    """Per-student grading record.  Append-only — each evaluation creates a
+    new row; old records (including released ones) are never modified or deleted.
+    The ``is_released`` flag is per-record so staff can release individual
+    student grades independently.
+    """
+    __tablename__ = "student_grades"
+
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    evaluator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    # Per-criterion breakdown — JSON string:
+    # [{"criterion_id": 1, "name": "Code Quality", "score": 18, "max_marks": 20}, ...]
+    criterion_scores = Column(Text, nullable=True)
+    total_score = Column(Float, nullable=False)
+    max_score = Column(Float, nullable=False, default=100.0)
+    notes = Column(Text, nullable=True)
+
+    # Release control — PER RECORD (not bulk)
+    is_released = Column(Boolean, default=False, nullable=False)
+    released_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # NO updated_at — records are IMMUTABLE (append-only)
+
+    # Relationships
+    workspace = relationship("Workspace")
+    project = relationship("Project")
+    student = relationship("User", foreign_keys=[student_id])
+    evaluator = relationship("User", foreign_keys=[evaluator_id])
+
+    def __repr__(self):
+        return f"<StudentGrade id={self.id} student={self.student_id} project={self.project_id} released={self.is_released}>"
+

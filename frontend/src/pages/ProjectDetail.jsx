@@ -1,9 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
-import AppLayout from '../layouts/AppLayout';
-import LoadingSpinner from '../components/LoadingSpinner';
-import projectService from '../services/projectService';
-import { useAuth } from '../context/AuthContext';
+import StudentGradingPanel from '../components/StudentGradingPanel';
 
 export default function ProjectDetail() {
   const { projectId } = useParams();
@@ -52,6 +47,10 @@ export default function ProjectDetail() {
   const [submittingEval, setSubmittingEval] = useState(false);
   const [evalError, setEvalError] = useState('');
   const [evalSuccess, setEvalSuccess] = useState('');
+
+  // Student own released grades
+  const [myGrades, setMyGrades] = useState([]);
+  const [loadingMyGrades, setLoadingMyGrades] = useState(false);
 
   // ─── Load project ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -106,6 +105,23 @@ export default function ProjectDetail() {
       }
     };
     fetchEvals();
+  }, [project, workspaceId, user.role]);
+
+  // ─── Load student's own released grades (student only) ──────────────────────
+  useEffect(() => {
+    if (!project || !workspaceId || user.role !== 'STUDENT') return;
+    const fetchMyGrades = async () => {
+      try {
+        setLoadingMyGrades(true);
+        const data = await projectService.getMyGrade(workspaceId, project.project_id);
+        setMyGrades(data || []);
+      } catch (err) {
+        // Silently ignore if not released yet
+      } finally {
+        setLoadingMyGrades(false);
+      }
+    };
+    fetchMyGrades();
   }, [project, workspaceId, user.role]);
 
   // ─── Handlers ────────────────────────────────────────────────────────────────
@@ -494,16 +510,25 @@ export default function ProjectDetail() {
             </div>
           )}
 
-          {/* ─── Faculty: Grading / Evaluation Panel ─── */}
+          {/* ─── Faculty: Individual Student Grading & Project Evaluation Panel ─── */}
           {isWorkspaceContext && user.role === 'STAFF' && (
             <div className="detail-section">
+              <div className="card card--flat mb-24" style={{ padding: '20px' }}>
+                <StudentGradingPanel
+                  workspaceId={workspaceId}
+                  projectId={project.project_id}
+                  groupName={project.group_name}
+                  members={project.members || []}
+                />
+              </div>
+
               <div className="flex justify-between items-center mb-16">
                 <h2 className="detail-section__title" style={{ marginBottom: 0, borderBottom: 'none', paddingBottom: 0 }}>
-                  📊 Grading &amp; Evaluation
+                  📊 Overall Project Evaluations
                 </h2>
                 <button onClick={() => { setShowEvalForm(f => !f); setEvalError(''); setEvalSuccess(''); }}
                   className="btn btn--secondary btn--sm">
-                  {showEvalForm ? 'Cancel' : '➕ New Evaluation'}
+                  {showEvalForm ? 'Cancel' : '➕ New Project Evaluation'}
                 </button>
               </div>
 
@@ -538,7 +563,7 @@ export default function ProjectDetail() {
 
               {/* Grading History */}
               <h4 style={{ fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', color: 'var(--text-accent)', marginBottom: '12px' }}>
-                Grading History ({evaluations.length} record{evaluations.length !== 1 ? 's' : ''})
+                Overall Project History ({evaluations.length} record{evaluations.length !== 1 ? 's' : ''})
               </h4>
               {loadingEvals ? (
                 <LoadingSpinner message="Loading grading history..." />
@@ -577,7 +602,84 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', borderStyle: 'dashed' }}>
-                  No evaluations recorded yet for this project.
+                  No overall evaluations recorded yet for this project.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ─── Student: My Released Grade Section ─── */}
+          {isWorkspaceContext && user.role === 'STUDENT' && (
+            <div className="detail-section">
+              <h2 className="detail-section__title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>🎯</span> My Released Grades &amp; Evaluation Feedback
+              </h2>
+
+              {loadingMyGrades ? (
+                <LoadingSpinner message="Loading your released grades..." />
+              ) : myGrades.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {myGrades.map((g, idx) => {
+                    const pct = Math.round((g.total_score / g.max_score) * 100);
+                    const isLatest = idx === 0; // ordered created_at desc
+                    let crits = [];
+                    try {
+                      if (g.criterion_scores) {
+                        crits = typeof g.criterion_scores === 'string' ? JSON.parse(g.criterion_scores) : g.criterion_scores;
+                      }
+                    } catch {}
+
+                    return (
+                      <div
+                        key={g.id}
+                        className="card card--flat"
+                        style={{
+                          padding: '18px',
+                          border: isLatest ? '1px solid var(--clr-success)' : '1px solid var(--border)',
+                          background: isLatest ? 'rgba(46, 213, 115, 0.03)' : 'rgba(255,255,255,0.005)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                          <div>
+                            <span style={{ fontSize: '20px', fontWeight: '700', color: pct >= 75 ? 'var(--clr-success)' : pct >= 50 ? 'var(--clr-warning)' : 'var(--clr-error)' }}>
+                              {g.total_score} / {g.max_score}
+                            </span>
+                            <span style={{ marginLeft: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>({pct}%)</span>
+                            {isLatest && <span className="badge badge--success" style={{ marginLeft: '8px', fontSize: '10px' }}>Latest Released</span>}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Released: {g.released_at ? new Date(g.released_at).toLocaleDateString() : new Date(g.created_at).toLocaleDateString()}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Evaluator: {g.evaluator_name}</div>
+                          </div>
+                        </div>
+
+                        {/* Breakdown by criteria */}
+                        {crits && crits.length > 0 && (
+                          <div style={{ background: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: 'var(--radius-sm)', marginBottom: '10px' }}>
+                            <strong style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>Criterion Breakdown:</strong>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '8px' }}>
+                              {crits.map((c, cIdx) => (
+                                <div key={cIdx} style={{ fontSize: '12px' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>{c.name}: </span>
+                                  <strong>{c.score}/{c.max_marks}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {g.notes && (
+                          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '8px 0 0 0', lineHeight: '1.5', fontStyle: 'italic' }}>
+                            "{g.notes}"
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', borderStyle: 'dashed' }}>
+                  🔒 No released grades available yet. Your faculty evaluator will release your grade once review is complete.
                 </div>
               )}
             </div>

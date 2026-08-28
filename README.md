@@ -2,6 +2,10 @@
 
 MeshVault is a premium **Academic Project Management System** designed for computer science students and academic staff. Built to manage student groups and projects for courses like Data Structures & Algorithms, MeshVault uses **custom DSA engines implemented from scratch** to optimize search, analytics, and review management.
 
+### 🌐 Live Demo
+
+**[https://meshvault.vercel.app](https://meshvault.vercel.app)**
+
 ---
 
 ## 🚀 Key Features

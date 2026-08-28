@@ -339,3 +339,11 @@ class DirectRemovalRequest(BaseModel):
     reason: str
 
 
+# ─── Student Grading (Per-Student, Append-Only) ───────────────────────────────
+
+class StudentGradeCreate(BaseModel):
+    student_id: int
+    total_score: float
+    max_score: float = 100.0
+    notes: Optional[str] = None
+    criterion_scores: Optional[List[CriterionScore]] = None
