@@ -2557,6 +2557,32 @@ def _student_grade_out(sg, db) -> dict:
     }
 
 
+@router.get("/workspaces/{workspace_id}/student-grades")
+def list_workspace_student_grades(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List ALL student grades for all projects in a workspace (host only)."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+        
+    if ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden: not the workspace host")
+
+    grades = (
+        db.query(StudentGrade)
+        .filter(StudentGrade.workspace_id == workspace_id)
+        .order_by(StudentGrade.created_at.desc())
+        .all()
+    )
+    return [_student_grade_out(g, db) for g in grades]
+
+
 @router.get("/workspaces/{workspace_id}/projects/{project_id}/student-grades")
 def list_student_grades(
     workspace_id: int,

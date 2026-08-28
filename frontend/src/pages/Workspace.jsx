@@ -6,6 +6,7 @@ import EmptyState from '../components/EmptyState';
 import ProjectCard from '../components/ProjectCard';
 import GroupCard from '../components/GroupCard';
 import workspaceService from '../services/workspaceService';
+import projectService from '../services/projectService';
 import authService from '../services/authService';
 import { useAuth } from '../context/AuthContext';
 
@@ -43,6 +44,12 @@ export default function Workspace() {
   const [schemeError, setSchemeError] = useState('');
   const [editingCritId, setEditingCritId] = useState(null);
 
+  // Gradebook tab states
+  const [activeTab, setActiveTab] = useState('overview'); // overview or gradebook
+  const [workspaceGrades, setWorkspaceGrades] = useState([]);
+  const [loadingGrades, setLoadingGrades] = useState(false);
+  const [gradesSearch, setGradesSearch] = useState('');
+
   // 1. Fetch workspaces listing
   useEffect(() => {
     const fetchWorkspaces = async () => {
@@ -78,6 +85,24 @@ export default function Workspace() {
     };
     fetchDetail();
   }, [selectedWs, user]);
+
+  // 2.5 Fetch student grades if in gradebook view
+  useEffect(() => {
+    if (!selectedWs || activeTab !== 'gradebook' || user.role !== 'STAFF') return;
+
+    const fetchGrades = async () => {
+      try {
+        setLoadingGrades(true);
+        const data = await workspaceService.getWorkspaceStudentGrades(selectedWs.id);
+        setWorkspaceGrades(data || []);
+      } catch (err) {
+        setError(err.message || 'Failed to load workspace grades.');
+      } finally {
+        setLoadingGrades(false);
+      }
+    };
+    fetchGrades();
+  }, [selectedWs, activeTab, user.role]);
 
   // 3. Load Access Control Data
   useEffect(() => {
@@ -377,7 +402,7 @@ export default function Workspace() {
       {loadingDetail ? (
         <LoadingSpinner message="Loading workspace elements..." />
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
           {/* ─── Workspace Join Code (host only) ─── */}
           {selectedWs && user.role === 'STAFF' && selectedWs.join_code && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 'var(--radius)', marginBottom: '4px' }}>
@@ -402,55 +427,204 @@ export default function Workspace() {
             </p>
           )}
 
-          {/* Groups Section */}
-          <div className="detail-section">
-            <h2 className="detail-section__title">Class Groups ({wsDetail?.groups?.length || 0})</h2>
-            {wsDetail?.groups?.length > 0 ? (
-              <div className="grid grid--3">
-                {wsDetail.groups.map(group => (
-                  <GroupCard key={group.id} group={group} />
-                ))}
-              </div>
-            ) : (
-              <EmptyState icon="👥" title="No groups established" text="No lab teams have been approved inside this workspace yet." />
-            )}
-          </div>
+          {/* ─── Workspace Tab Navigation (Staff Only) ─── */}
+          {selectedWs && user.role === 'STAFF' && (
+            <div style={{ display: 'flex', gap: '12px', borderBottom: '1px solid var(--border)', paddingBottom: '12px', marginBottom: '8px' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('overview')}
+                className={`btn ${activeTab === 'overview' ? 'btn--primary' : 'btn--ghost'}`}
+                style={{ fontSize: '13px', padding: '8px 16px', borderRadius: 'var(--radius-sm)' }}
+              >
+                👥 Overview (Groups &amp; Projects)
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('gradebook')}
+                className={`btn ${activeTab === 'gradebook' ? 'btn--primary' : 'btn--ghost'}`}
+                style={{ fontSize: '13px', padding: '8px 16px', borderRadius: 'var(--radius-sm)' }}
+              >
+                📊 Mark Registry (Gradebook)
+              </button>
+            </div>
+          )}
 
-          {/* Projects Section — linked with workspace context for faculty evaluation */}
-          <div className="detail-section">
-            <h2 className="detail-section__title">Workspace Projects ({wsDetail?.projects?.length || 0})</h2>
-            {wsDetail?.projects?.length > 0 ? (
-              <div className="grid grid--3">
-                {wsDetail.projects.map(proj => (
-                  <div key={proj.project_id} className="card" style={{ padding: '18px', cursor: 'pointer', transition: 'border-color 0.2s', border: '1px solid var(--border)' }}
-                    onClick={() => window.location.href = `/projects/${proj.project_id}?workspace_id=${selectedWs.id}`}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <h3 style={{ fontSize: '14px', fontWeight: '600', margin: 0 }}>{proj.name}</h3>
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{proj.project_id}</div>
-                    {proj.group_name && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>Group: {proj.group_name}</div>}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                      <span className={`badge ${proj.status === 'COMPLETED' ? 'badge--success' : proj.status === 'IN_PROGRESS' ? 'badge--warning' : 'badge--muted'}`} style={{ fontSize: '10px' }}>
-                        {proj.status?.replace('_', ' ')}
-                      </span>
-                    </div>
-                    <div className="progress-bar">
-                      <div className="progress-bar__fill" style={{ width: `${proj.progress || 0}%` }} />
-                    </div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'right' }}>{Math.round(proj.progress || 0)}% complete</div>
-                    {user.role === 'STAFF' && (
-                      <div style={{ marginTop: '10px', fontSize: '11px', color: 'rgba(99,102,241,0.8)', fontWeight: '500' }}>
-                        📊 View Evaluation & Comments →
-                      </div>
-                    )}
+          {activeTab === 'overview' || user.role !== 'STAFF' ? (
+            <>
+              {/* Groups Section */}
+              <div className="detail-section">
+                <h2 className="detail-section__title">Class Groups ({wsDetail?.groups?.length || 0})</h2>
+                {wsDetail?.groups?.length > 0 ? (
+                  <div className="grid grid--3">
+                    {wsDetail.groups.map(group => (
+                      <GroupCard key={group.id} group={group} />
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <EmptyState icon="👥" title="No groups established" text="No lab teams have been approved inside this workspace yet." />
+                )}
               </div>
-            ) : (
-              <EmptyState icon="📁" title="No projects tracked" text="There are currently no active projects registered under this workspace." />
-            )}
-          </div>
+
+              {/* Projects Section — linked with workspace context for faculty evaluation */}
+              <div className="detail-section">
+                <h2 className="detail-section__title">Workspace Projects ({wsDetail?.projects?.length || 0})</h2>
+                {wsDetail?.projects?.length > 0 ? (
+                  <div className="grid grid--3">
+                    {wsDetail.projects.map(proj => (
+                      <div key={proj.project_id} className="card" style={{ padding: '18px', cursor: 'pointer', transition: 'border-color 0.2s', border: '1px solid var(--border)' }}
+                        onClick={() => window.location.href = `/projects/${proj.project_id}?workspace_id=${selectedWs.id}`}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <h3 style={{ fontSize: '14px', fontWeight: '600', margin: 0 }}>{proj.name}</h3>
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{proj.project_id}</div>
+                        {proj.group_name && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>Group: {proj.group_name}</div>}
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+                          <span className={`badge ${proj.status === 'COMPLETED' ? 'badge--success' : proj.status === 'IN_PROGRESS' ? 'badge--warning' : 'badge--muted'}`} style={{ fontSize: '10px' }}>
+                            {proj.status?.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <div className="progress-bar">
+                          <div className="progress-bar__fill" style={{ width: `${proj.progress || 0}%` }} />
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', textAlign: 'right' }}>{Math.round(proj.progress || 0)}% complete</div>
+                        {user.role === 'STAFF' && (
+                          <div style={{ marginTop: '10px', fontSize: '11px', color: 'rgba(99,102,241,0.8)', fontWeight: '500' }}>
+                            📊 View Evaluation & Comments →
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState icon="📁" title="No projects tracked" text="There are currently no active projects registered under this workspace." />
+                )}
+              </div>
+            </>
+          ) : (
+            /* ─── Mark Registry (Gradebook) Tab ─── */
+            <div className="detail-section">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2 className="detail-section__title" style={{ margin: 0, borderBottom: 'none', paddingBottom: 0 }}>
+                  📝 Student Mark Registry &amp; History
+                </h2>
+                <div style={{ width: '300px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="🔍 Search student name, ID or project..."
+                    value={gradesSearch}
+                    onChange={(e) => setGradesSearch(e.target.value)}
+                    style={{ padding: '8px 12px', fontSize: '13px' }}
+                  />
+                </div>
+              </div>
+
+              {loadingGrades ? (
+                <LoadingSpinner message="Querying student marks..." />
+              ) : workspaceGrades.length > 0 ? (
+                (() => {
+                  const filtered = workspaceGrades.filter(g =>
+                    g.student_name.toLowerCase().includes(gradesSearch.toLowerCase()) ||
+                    g.student_user_id.toLowerCase().includes(gradesSearch.toLowerCase()) ||
+                    g.project_id.toLowerCase().includes(gradesSearch.toLowerCase())
+                  );
+
+                  const handleReleaseFromRegistry = async (gradeId, studentName) => {
+                    try {
+                      await projectService.releaseStudentGrade(selectedWs.id, '', gradeId);
+                      // reload
+                      const data = await workspaceService.getWorkspaceStudentGrades(selectedWs.id);
+                      setWorkspaceGrades(data || []);
+                    } catch (err) {
+                      alert(err.message || 'Failed to release grade.');
+                    }
+                  };
+
+                  return filtered.length > 0 ? (
+                    <div className="table-wrapper">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Student</th>
+                            <th>Project ID</th>
+                            <th>Total Mark</th>
+                            <th>Criterion Breakdown</th>
+                            <th>Status</th>
+                            <th>Date Evaluated</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((g) => {
+                            let crits = [];
+                            try {
+                              if (g.criterion_scores) {
+                                crits = typeof g.criterion_scores === 'string' ? JSON.parse(g.criterion_scores) : g.criterion_scores;
+                              }
+                            } catch {}
+
+                            return (
+                              <tr key={g.id}>
+                                <td>
+                                  <strong>{g.student_name}</strong>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{g.student_user_id}</div>
+                                </td>
+                                <td>
+                                  <Link to={`/projects/${g.project_id}?workspace_id=${selectedWs.id}`} style={{ fontWeight: '600' }}>
+                                    {g.project_id}
+                                  </Link>
+                                </td>
+                                <td style={{ fontSize: '14px', fontWeight: '700', color: 'var(--accent)' }}>
+                                  {g.total_score} / {g.max_score}
+                                </td>
+                                <td>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px' }}>
+                                    {crits.map((c, cIdx) => (
+                                      <div key={cIdx}>
+                                        <span style={{ color: 'var(--text-muted)' }}>{c.name}: </span>
+                                        <strong>{c.score}/{c.max_marks}</strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className={`badge ${g.is_released ? 'badge--success' : 'badge--warning'}`}>
+                                    {g.is_released ? 'RELEASED' : 'UNRELEASED'}
+                                  </span>
+                                </td>
+                                <td style={{ fontSize: '11.5px' }}>
+                                  {new Date(g.created_at).toLocaleDateString()}
+                                </td>
+                                <td>
+                                  {!g.is_released ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn--sm"
+                                      style={{ background: 'var(--clr-success)', border: 'none', color: '#fff', fontSize: '11px', padding: '4px 10px' }}
+                                      onClick={() => handleReleaseFromRegistry(g.id, g.student_name)}
+                                    >
+                                      🔓 Release Grade
+                                    </button>
+                                  ) : (
+                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Released</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <EmptyState icon="🔍" title="No matching records" text="No student grades match your search query." />
+                  );
+                })()
+              ) : (
+                <EmptyState icon="📝" title="Gradebook empty" text="No individual student evaluations have been submitted in this workspace yet." />
+              )}
+            </div>
+          )}
         </div>
       )}
 

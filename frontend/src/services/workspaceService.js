@@ -28,6 +28,10 @@ const workspaceService = {
   async saveGradingScheme(id, data) {
     return api.post(`/api/workspaces/${id}/grading-scheme`, data);
   },
+
+  async getWorkspaceStudentGrades(id) {
+    return api.get(`/api/workspaces/${id}/student-grades`);
+  },
 };
 
 export default workspaceService;
