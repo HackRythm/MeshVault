@@ -20,17 +20,24 @@ def add_new_users():
                 "role": "STAFF"
             },
             {
-                "name": "Hash Adsa",
-                "email": "hash.adsa@university.edu",
-                "user_id": "STU-007",
-                "password": hash_password("hashadsa"),
+                "name": "Hashwin",
+                "email": "hashwin@university.edu",
+                "user_id": "STU-009",
+                "password": hash_password("student123"),
                 "role": "STUDENT"
             },
             {
-                "name": "Sharvesh Adsa",
-                "email": "sharvesh.adsa@university.edu",
-                "user_id": "STU-008",
-                "password": hash_password("sharveshadsa"),
+                "name": "Sharvesh",
+                "email": "sharvesh@university.edu",
+                "user_id": "STU-010",
+                "password": hash_password("student123"),
+                "role": "STUDENT"
+            },
+            {
+                "name": "Bhavesh",
+                "email": "bhavesh@university.edu",
+                "user_id": "STU-011",
+                "password": hash_password("student123"),
                 "role": "STUDENT"
             }
         ]
