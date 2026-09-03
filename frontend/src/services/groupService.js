@@ -13,8 +13,19 @@ const groupService = {
     return api.get(`/api/groups/${id}`);
   },
 
-  async createGroup(name, code, description) {
-    return api.post('/api/groups', { name, code, description });
+  async createGroup(name, code, description, workspaceCode) {
+    return api.post('/api/groups', {
+      name,
+      code,
+      description,
+      workspace_code: workspaceCode || undefined
+    });
+  },
+
+  async joinWorkspace(groupId, workspaceCode) {
+    return api.post(`/api/groups/${groupId}/join-workspace`, {
+      workspace_code: workspaceCode
+    });
   },
 
   async joinGroup(code) {

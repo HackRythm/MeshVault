@@ -47,11 +47,13 @@ class LoginResponse(BaseModel):
 # ─── Workspace ───────────────────────────────────────────────────────────────
 
 class WorkspaceCreate(BaseModel):
+    workspace_id: Optional[str] = None
     name: str
     course_code: str
     course_name: str
     academic_year: str
     description: Optional[str] = None
+
 
 
 class WorkspaceOut(BaseModel):
@@ -73,8 +75,17 @@ class WorkspaceOut(BaseModel):
 
 class GroupCreate(BaseModel):
     name: str
-    code: str
+    code: Optional[str] = None
     description: Optional[str] = None
+    workspace_code: Optional[str] = None  # Manually entered WS-001 or WS-ADSA-204
+    workspace_id: Optional[int] = None
+
+
+class GroupJoinWorkspaceRequest(BaseModel):
+    workspace_code: str  # The WS-xxx workspace ID to join
+
+
+
 
 
 class GroupOut(BaseModel):
@@ -323,9 +334,8 @@ class GroupJoinRequest(BaseModel):
 # ─── Workspace Group/Project Join Requests (Phase 2) ─────────────────────────
 
 class WorkspaceJoinRequest(BaseModel):
-    workspace_code: str
-    group_id: int
-    project_ids: List[str]
+    workspace_code: str  # The WS-xxx workspace_id code
+
 
 
 class WorkspaceRequestProcess(BaseModel):

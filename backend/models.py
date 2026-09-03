@@ -51,6 +51,7 @@ class Workspace(Base):
     __tablename__ = "workspaces"
 
     id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String(50), unique=True, nullable=True, index=True)  # WS-001, WS-002, ...
     name = Column(String(200), nullable=False)
     course_code = Column(String(50), nullable=False)
     course_name = Column(String(200), nullable=False)
@@ -69,9 +70,10 @@ class Workspace(Base):
     workspace_projects = relationship(
         "WorkspaceProject", back_populates="workspace", cascade="all, delete-orphan"
     )
+    groups = relationship("Group", back_populates="workspace")
 
     def __repr__(self):
-        return f"<Workspace {self.course_code}: {self.name}>"
+        return f"<Workspace {self.workspace_id}: {self.name}>"
 
 
 # ─── WorkspaceGroup ──────────────────────────────────────────────────────────
@@ -130,6 +132,8 @@ class Group(Base):
     __tablename__ = "groups"
 
     id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    group_number = Column(String(50), nullable=True)  # G1, G2, G11, G25 ...
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     code = Column(String(50), unique=True, nullable=True, index=True)
@@ -137,6 +141,7 @@ class Group(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
+    workspace = relationship("Workspace", back_populates="groups")
     workspace_groups = relationship(
         "WorkspaceGroup", back_populates="group", cascade="all, delete-orphan"
     )
@@ -145,8 +150,12 @@ class Group(Base):
     )
     projects = relationship("Project", back_populates="group")
 
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "group_number", name="uq_workspace_group_number"),
+    )
+
     def __repr__(self):
-        return f"<Group {self.name}>"
+        return f"<Group {self.group_number}: {self.name}>"
 
 
 # ─── Group Membership ───────────────────────────────────────────────────────
@@ -295,6 +304,10 @@ class WorkspaceAccess(Base):
     workspace_id = Column(Integer, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
+    status = Column(String(30), nullable=False, default="APPROVED")  # PENDING | APPROVED | REJECTED
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(Text, nullable=True)
 
     # Relationships
     workspace = relationship("Workspace")

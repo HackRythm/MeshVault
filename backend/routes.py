@@ -22,7 +22,7 @@ from schemas import (
     LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate,
     WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate, GroupCreate, GroupJoinRequest,
     WorkspaceJoinRequest, WorkspaceRequestProcess, DirectRemovalRequest, EvaluationCreate,
-    StudentGradeCreate
+    StudentGradeCreate, GroupJoinWorkspaceRequest
 )
 from auth import authenticate_user
 
@@ -47,50 +47,23 @@ def get_current_user(
 
 
 def has_workspace_access(workspace_id: int, current_user: User, db: Session) -> bool:
+    """Check if user has APPROVED access to a workspace."""
     ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not ws:
         return False
 
-    if current_user.role == "STAFF":
-        return ws.created_by == current_user.id
-
-    # Student must belong to at least one group in this workspace
-    mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
-    gids = [m.group_id for m in mems]
-    if not gids:
-        return False
-
-    # Check if any of the student's groups are APPROVED in this workspace
-    ws_groups = db.query(Group).join(WorkspaceGroup).filter(
-        WorkspaceGroup.workspace_id == workspace_id,
-        WorkspaceGroup.status == "APPROVED",
-        Group.id.in_(gids)
-    ).all()
-    if not ws_groups:
-        return False
-
-    if not ws.is_restricted:
+    # Staff who created the workspace always has access
+    if current_user.role == "STAFF" and ws.created_by == current_user.id:
         return True
 
-    # Restricted: check explicit permissions
-    # 1. Allowed individually?
+    # Check for an APPROVED WorkspaceAccess record
     access = db.query(WorkspaceAccess).filter(
         WorkspaceAccess.workspace_id == workspace_id,
-        WorkspaceAccess.user_id == current_user.id
+        WorkspaceAccess.user_id == current_user.id,
+        WorkspaceAccess.status == "APPROVED"
     ).first()
-    if access:
-        return True
+    return access is not None
 
-    # 2. Allowed via group?
-    ws_gids = [g.id for g in ws_groups]
-    access_group = db.query(WorkspaceAccess).filter(
-        WorkspaceAccess.workspace_id == workspace_id,
-        WorkspaceAccess.group_id.in_(ws_gids)
-    ).first()
-    if access_group:
-        return True
-
-    return False
 
 
 def has_project_access(project, current_user: User, db: Session) -> bool:
@@ -158,6 +131,27 @@ def _generate_workspace_join_code(db: Session) -> str:
             return code
 
 
+def _generate_workspace_id(db: Session) -> str:
+    """Generate next sequential workspace_id like WS-001, WS-002, ..."""
+    from sqlalchemy import func
+    # Find the highest existing numeric suffix
+    all_ws_ids = db.query(Workspace.workspace_id).filter(
+        Workspace.workspace_id.isnot(None)
+    ).all()
+    max_num = 0
+    for (wid,) in all_ws_ids:
+        if wid and wid.startswith("WS-"):
+            try:
+                num = int(wid[3:])
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                pass
+    return f"WS-{max_num + 1:03d}"
+
+
+
+
 @router.get("/workspaces")
 def list_workspaces(
     db: Session = Depends(get_db),
@@ -165,14 +159,15 @@ def list_workspaces(
 ):
     """List workspaces visible to the current user."""
     if current_user.role == "STUDENT":
-        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
-        gids = [m.group_id for m in mems]
-        if not gids:
+        # Students see workspaces where they have APPROVED access
+        access_records = db.query(WorkspaceAccess).filter(
+            WorkspaceAccess.user_id == current_user.id,
+            WorkspaceAccess.status == "APPROVED"
+        ).all()
+        wids = [a.workspace_id for a in access_records]
+        if not wids:
             return []
-        ws_groups = db.query(WorkspaceGroup).filter(WorkspaceGroup.group_id.in_(gids), WorkspaceGroup.status == "APPROVED").all()
-        wids = list({wg.workspace_id for wg in ws_groups})
-        allowed_wids = [wid for wid in wids if has_workspace_access(wid, current_user, db)]
-        workspaces = db.query(Workspace).filter(Workspace.id.in_(allowed_wids)).all()
+        workspaces = db.query(Workspace).filter(Workspace.id.in_(wids)).all()
     elif current_user.role == "STAFF":
         workspaces = db.query(Workspace).filter(Workspace.created_by == current_user.id).all()
     else:
@@ -180,22 +175,25 @@ def list_workspaces(
 
     result = []
     for w in workspaces:
-        ws_groups = db.query(Group).join(WorkspaceGroup).filter(
-            WorkspaceGroup.workspace_id == w.id,
-            WorkspaceGroup.status == "APPROVED"
-        ).all()
+        ws_groups = db.query(Group).filter(Group.workspace_id == w.id).all()
         gids = [g.id for g in ws_groups]
         student_count = (
             db.query(GroupMembership).filter(GroupMembership.group_id.in_(gids)).count()
             if gids else 0
         )
-        project_count = db.query(WorkspaceProject).filter(
-            WorkspaceProject.workspace_id == w.id,
-            WorkspaceProject.status == "APPROVED"
-        ).count()
+        project_count = db.query(Project).filter(Project.group_id.in_(gids)).count() if gids else 0
+
+        # Count pending join requests for staff
+        pending_count = 0
+        if current_user.role == "STAFF":
+            pending_count = db.query(WorkspaceAccess).filter(
+                WorkspaceAccess.workspace_id == w.id,
+                WorkspaceAccess.status == "PENDING"
+            ).count()
 
         result.append({
             "id": w.id,
+            "workspace_id": w.workspace_id,
             "name": w.name,
             "course_code": w.course_code,
             "course_name": w.course_name,
@@ -208,6 +206,7 @@ def list_workspaces(
             "student_count": student_count,
             "is_restricted": w.is_restricted,
             "join_code": w.join_code,
+            "pending_requests": pending_count,
         })
     return result
 
@@ -218,26 +217,46 @@ def create_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new academic workspace."""
+    """Create a new academic workspace (staff only). Auto-generates WS-xxx ID."""
     if current_user.role != "STAFF":
         raise HTTPException(status_code=403, detail="Forbidden")
     
-    code = _generate_workspace_join_code(db)
+    join_code = _generate_workspace_join_code(db)
+    ws_id = body.workspace_id.strip() if (body.workspace_id and body.workspace_id.strip()) else _generate_workspace_id(db)
+
+    # Check if custom workspace_id already exists
+    existing_ws = db.query(Workspace).filter(Workspace.workspace_id == ws_id).first()
+    if existing_ws:
+        raise HTTPException(status_code=400, detail=f"Workspace ID '{ws_id}' is already taken. Please choose another ID.")
 
     ws = Workspace(
+        workspace_id=ws_id,
         name=body.name,
         course_code=body.course_code,
         course_name=body.course_name,
         academic_year=body.academic_year,
         description=body.description,
         created_by=current_user.id,
-        join_code=code,
+        join_code=join_code,
     )
     db.add(ws)
+    db.flush()  # Get ws.id
+
+    # Auto-create APPROVED access for the creator
+    access = WorkspaceAccess(
+        workspace_id=ws.id,
+        user_id=current_user.id,
+        status="APPROVED",
+        requested_at=datetime.utcnow(),
+        processed_at=datetime.utcnow(),
+    )
+    db.add(access)
     db.commit()
     db.refresh(ws)
+
     return {
         "id": ws.id,
+        "workspace_id": ws.workspace_id,
         "name": ws.name,
         "course_code": ws.course_code,
         "course_name": ws.course_name,
@@ -263,17 +282,12 @@ def get_workspace(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    # Fetch groups with APPROVED link to this workspace
-    groups_query = db.query(Group).join(WorkspaceGroup).filter(
-        WorkspaceGroup.workspace_id == workspace_id,
-        WorkspaceGroup.status == "APPROVED"
-    )
-    
-    # Fetch projects with APPROVED link to this workspace
-    projects_query = db.query(Project).join(WorkspaceProject).filter(
-        WorkspaceProject.workspace_id == workspace_id,
-        WorkspaceProject.status == "APPROVED"
-    )
+    # Fetch groups directly linked to this workspace
+    groups_query = db.query(Group).filter(Group.workspace_id == workspace_id)
+
+    # Fetch projects belonging to groups in this workspace
+    all_group_ids = [g.id for g in db.query(Group).filter(Group.workspace_id == workspace_id).all()]
+    projects_query = db.query(Project).filter(Project.group_id.in_(all_group_ids)) if all_group_ids else db.query(Project).filter(False)
 
     if current_user.role == "STUDENT":
         mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
@@ -284,18 +298,27 @@ def get_workspace(
     groups = groups_query.all()
     group_list = []
     for g in groups:
-        # Projects approved in THIS workspace that belong to group g
-        proj_count = db.query(WorkspaceProject).filter(
-            WorkspaceProject.workspace_id == workspace_id,
-            WorkspaceProject.status == "APPROVED",
-            WorkspaceProject.project.has(group_id=g.id)
-        ).count()
+        proj_count = db.query(Project).filter(Project.group_id == g.id).count()
+        members = db.query(GroupMembership).filter(GroupMembership.group_id == g.id).all()
+        member_list = []
+        for m in members:
+            u = db.query(User).filter(User.id == m.user_id).first()
+            if u:
+                member_list.append({
+                    "id": u.id,
+                    "name": u.name,
+                    "email": u.email,
+                    "is_leader": m.is_leader,
+                })
         group_list.append({
             "id": g.id,
+            "group_number": g.group_number,
             "name": g.name,
             "description": g.description,
-            "member_count": db.query(GroupMembership).filter(GroupMembership.group_id == g.id).count(),
+            "code": g.code,
+            "member_count": len(members),
             "project_count": proj_count,
+            "members": member_list,
         })
 
     projects = projects_query.all()
@@ -304,8 +327,26 @@ def get_workspace(
         grp = db.query(Group).filter(Group.id == p.group_id).first()
         project_list.append(_project_dict(p, grp))
 
+    # Pending join requests for staff
+    pending_requests = []
+    if current_user.role == "STAFF":
+        pending = db.query(WorkspaceAccess).filter(
+            WorkspaceAccess.workspace_id == workspace_id,
+            WorkspaceAccess.status == "PENDING"
+        ).all()
+        for pr in pending:
+            user = db.query(User).filter(User.id == pr.user_id).first()
+            pending_requests.append({
+                "id": pr.id,
+                "user_id": pr.user_id,
+                "user_name": user.name if user else "Unknown",
+                "user_email": user.email if user else "",
+                "requested_at": str(pr.requested_at) if pr.requested_at else None,
+            })
+
     return {
         "id": ws.id,
+        "workspace_id": ws.workspace_id,
         "name": ws.name,
         "course_code": ws.course_code,
         "course_name": ws.course_name,
@@ -316,7 +357,9 @@ def get_workspace(
         "join_code": ws.join_code,
         "groups": group_list,
         "projects": project_list,
+        "pending_requests": pending_requests,
     }
+
 
 
 # ─── Workspace Connections & Approvals (Phase 2) ─────────────────────────────
@@ -327,75 +370,151 @@ def join_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Allow Group Leaders to submit workspace connection request for group and projects."""
+    """Student submits a workspace join request using the WS-xxx workspace_id code."""
     if current_user.role != "STUDENT":
-        raise HTTPException(status_code=403, detail="Forbidden: Only students can request to join workspaces.")
+        raise HTTPException(status_code=403, detail="Only students can request to join workspaces.")
 
-    m_check = db.query(GroupMembership).filter(
-        GroupMembership.group_id == body.group_id,
-        GroupMembership.user_id == current_user.id
-    ).first()
-    if not m_check or not m_check.is_leader:
-        raise HTTPException(status_code=403, detail="Forbidden: Only group leaders can request to join workspaces.")
-
-    ws = db.query(Workspace).filter(Workspace.join_code == body.workspace_code).first()
+    # Lookup workspace by workspace_id (WS-xxx format)
+    ws = db.query(Workspace).filter(Workspace.workspace_id == body.workspace_code).first()
     if not ws:
-        raise HTTPException(404, detail="Workspace with this code not found.")
+        raise HTTPException(404, detail="No workspace found with that ID code.")
 
-    wg = db.query(WorkspaceGroup).filter(
-        WorkspaceGroup.workspace_id == ws.id,
-        WorkspaceGroup.group_id == body.group_id
+    # Check if student already has access or a pending request
+    existing = db.query(WorkspaceAccess).filter(
+        WorkspaceAccess.workspace_id == ws.id,
+        WorkspaceAccess.user_id == current_user.id,
     ).first()
-    
-    if wg:
-        wg.status = "PENDING"
-        wg.requested_by = current_user.id
-        wg.requested_at = datetime.utcnow()
-        wg.approved_at = None
-        wg.rejected_at = None
-        wg.rejection_reason = None
-    else:
-        wg = WorkspaceGroup(
-            workspace_id=ws.id,
-            group_id=body.group_id,
-            requested_by=current_user.id,
-            status="PENDING",
-            requested_at=datetime.utcnow()
-        )
-        db.add(wg)
+    if existing:
+        if existing.status == "APPROVED":
+            raise HTTPException(400, detail="You already have access to this workspace.")
+        elif existing.status == "PENDING":
+            raise HTTPException(400, detail="You already have a pending request for this workspace.")
+        elif existing.status == "REJECTED":
+            # Allow re-request after rejection
+            existing.status = "PENDING"
+            existing.requested_at = datetime.utcnow()
+            existing.processed_at = None
+            existing.rejection_reason = None
+            db.commit()
+            return {"success": True, "message": f"Join request re-submitted for workspace {ws.workspace_id}."}
 
-    for pid in body.project_ids:
-        p = db.query(Project).filter(
-            Project.project_id == pid,
-            Project.group_id == body.group_id
-        ).first()
-        if not p:
-            raise HTTPException(404, detail=f"Project with ID '{pid}' not found in your group.")
-
-        wp = db.query(WorkspaceProject).filter(
-            WorkspaceProject.workspace_id == ws.id,
-            WorkspaceProject.project_id == p.id
-        ).first()
-        
-        if wp:
-            wp.status = "PENDING"
-            wp.requested_by = current_user.id
-            wp.requested_at = datetime.utcnow()
-            wp.approved_at = None
-            wp.rejected_at = None
-            wp.rejection_reason = None
-        else:
-            wp = WorkspaceProject(
-                workspace_id=ws.id,
-                project_id=p.id,
-                requested_by=current_user.id,
-                status="PENDING",
-                requested_at=datetime.utcnow()
-            )
-            db.add(wp)
-
+    # Create PENDING access request
+    access = WorkspaceAccess(
+        workspace_id=ws.id,
+        user_id=current_user.id,
+        status="PENDING",
+        requested_at=datetime.utcnow(),
+    )
+    db.add(access)
     db.commit()
-    return {"success": True, "message": "Workspace request submitted successfully."}
+    return {"success": True, "message": f"Join request submitted for workspace {ws.workspace_id}. Awaiting staff approval."}
+
+
+@router.get("/workspaces/{workspace_id}/join-requests")
+def list_join_requests(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Staff views pending join requests for their workspace."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws or ws.created_by != current_user.id:
+        raise HTTPException(404, "Workspace not found")
+
+    requests = db.query(WorkspaceAccess).filter(
+        WorkspaceAccess.workspace_id == workspace_id,
+        WorkspaceAccess.status == "PENDING"
+    ).all()
+
+    result = []
+    for r in requests:
+        user = db.query(User).filter(User.id == r.user_id).first()
+        result.append({
+            "id": r.id,
+            "user_id": r.user_id,
+            "user_name": user.name if user else "Unknown",
+            "user_email": user.email if user else "",
+            "status": r.status,
+            "requested_at": str(r.requested_at) if r.requested_at else None,
+        })
+    return result
+
+
+@router.post("/workspaces/{workspace_id}/join-requests/{request_id}/approve", status_code=200)
+def approve_join_request(
+    workspace_id: int,
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Staff approves a student's workspace join request."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws or ws.created_by != current_user.id:
+        raise HTTPException(404, "Workspace not found")
+
+    access = db.query(WorkspaceAccess).filter(
+        WorkspaceAccess.id == request_id,
+        WorkspaceAccess.workspace_id == workspace_id,
+        WorkspaceAccess.status == "PENDING"
+    ).first()
+    if not access:
+        raise HTTPException(404, "Join request not found or already processed")
+
+    access.status = "APPROVED"
+    access.processed_at = datetime.utcnow()
+    db.commit()
+
+    user = db.query(User).filter(User.id == access.user_id).first()
+    return {
+        "success": True,
+        "message": f"Approved join request for {user.name if user else 'user'}.",
+    }
+
+
+class JoinRejectBody(BaseModel):
+    reason: Optional[str] = None
+
+
+@router.post("/workspaces/{workspace_id}/join-requests/{request_id}/reject", status_code=200)
+def reject_join_request(
+    workspace_id: int,
+    request_id: int,
+    body: JoinRejectBody = JoinRejectBody(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Staff rejects a student's workspace join request."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws or ws.created_by != current_user.id:
+        raise HTTPException(404, "Workspace not found")
+
+    access = db.query(WorkspaceAccess).filter(
+        WorkspaceAccess.id == request_id,
+        WorkspaceAccess.workspace_id == workspace_id,
+        WorkspaceAccess.status == "PENDING"
+    ).first()
+    if not access:
+        raise HTTPException(404, "Join request not found or already processed")
+
+    access.status = "REJECTED"
+    access.processed_at = datetime.utcnow()
+    access.rejection_reason = body.reason
+    db.commit()
+
+    user = db.query(User).filter(User.id == access.user_id).first()
+    return {
+        "success": True,
+        "message": f"Rejected join request for {user.name if user else 'user'}.",
+    }
 
 
 @router.get("/workspaces/{workspace_id}/requests")
@@ -830,32 +949,24 @@ def list_groups(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List groups — role-aware scoping and optional workspace filtering."""
+    """List groups - role-aware scoping and optional workspace filtering."""
     if workspace_id and not has_workspace_access(workspace_id, current_user, db):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     query = db.query(Group)
     if workspace_id:
-        query = query.join(WorkspaceGroup).filter(
-            WorkspaceGroup.workspace_id == workspace_id,
-            WorkspaceGroup.status == "APPROVED"
-        )
+        query = query.filter(Group.workspace_id == workspace_id)
     if current_user.role == "STUDENT":
         mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         query = query.filter(Group.id.in_(gids))
+    elif current_user.role == "STAFF":
+        owned_wids = [w.id for w in db.query(Workspace).filter(Workspace.created_by == current_user.id).all()]
+        query = query.filter(Group.workspace_id.in_(owned_wids))
 
     groups = query.all()
     result = []
     for g in groups:
-        wgs = db.query(WorkspaceGroup).filter(WorkspaceGroup.group_id == g.id, WorkspaceGroup.status == "APPROVED").all()
-        workspace_ids = [wg.workspace_id for wg in wgs]
-
-        if current_user.role == "STAFF":
-            owned_wids = {w.id for w in db.query(Workspace).filter(Workspace.created_by == current_user.id).all()}
-            if not any(wid in owned_wids for wid in workspace_ids) and workspace_ids:
-                continue
-
         membership = db.query(GroupMembership).filter(
             GroupMembership.group_id == g.id,
             GroupMembership.user_id == current_user.id
@@ -863,8 +974,8 @@ def list_groups(
 
         result.append({
             "id": g.id,
-            "workspace_id": workspace_ids[0] if workspace_ids else None,
-            "workspace_ids": workspace_ids,
+            "workspace_id": g.workspace_id,
+            "group_number": g.group_number,
             "name": g.name,
             "description": g.description,
             "code": g.code,
@@ -883,16 +994,65 @@ def create_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new group (creator becomes leader)."""
-    # Check if code already exists
-    existing = db.query(Group).filter(Group.code == body.code).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Group join code already exists. Please choose a different one.")
+    """Create a new group (creator becomes leader). Can be created standalone or within a workspace."""
+    group_number = None
+    target_ws_id = body.workspace_id
+
+    # If workspace_code was manually entered, look it up
+    if body.workspace_code and body.workspace_code.strip():
+        ws = db.query(Workspace).filter(Workspace.workspace_id == body.workspace_code.strip()).first()
+        if not ws:
+            raise HTTPException(status_code=404, detail=f"No workspace found with ID '{body.workspace_code.strip()}'.")
+        target_ws_id = ws.id
+
+    if target_ws_id:
+        if not has_workspace_access(target_ws_id, current_user, db):
+            # Auto-request / auto-grant access if workspace exists
+            acc = db.query(WorkspaceAccess).filter(
+                WorkspaceAccess.workspace_id == target_ws_id,
+                WorkspaceAccess.user_id == current_user.id
+            ).first()
+            if not acc:
+                acc = WorkspaceAccess(
+                    workspace_id=target_ws_id,
+                    user_id=current_user.id,
+                    status="APPROVED",
+                    requested_at=datetime.utcnow(),
+                    processed_at=datetime.utcnow()
+                )
+                db.add(acc)
+                db.flush()
+
+        # Auto-generate group_number: find max existing in this workspace
+        existing_groups = db.query(Group).filter(Group.workspace_id == target_ws_id).all()
+        max_num = 0
+        for eg in existing_groups:
+            if eg.group_number and eg.group_number.startswith("G"):
+                try:
+                    num = int(eg.group_number[1:])
+                    if num > max_num:
+                        max_num = num
+                except ValueError:
+                    pass
+        group_number = f"G{max_num + 1}"
+
+    # Auto-generate or check code
+    code = body.code.strip() if body.code and body.code.strip() else None
+    if code:
+        existing = db.query(Group).filter(Group.code == code).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Group join code already exists. Please choose a different one.")
+    else:
+        import random, string
+        rand_str = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        code = f"GP-{rand_str}"
 
     grp = Group(
-        name=body.name,
-        code=body.code,
-        description=body.description,
+        workspace_id=target_ws_id if target_ws_id else None,
+        group_number=group_number,
+        name=body.name.strip(),
+        code=code,
+        description=body.description.strip() if body.description else None,
         created_by=current_user.id
     )
     db.add(grp)
@@ -910,6 +1070,8 @@ def create_group(
 
     return {
         "id": grp.id,
+        "workspace_id": grp.workspace_id,
+        "group_number": grp.group_number,
         "name": grp.name,
         "code": grp.code,
         "description": grp.description,
@@ -1087,13 +1249,85 @@ def delete_group(
     return {"success": True, "message": "Group deleted successfully."}
 
 
+@router.post("/groups/{group_id}/join-workspace")
+def group_join_workspace(
+    group_id: int,
+    body: GroupJoinWorkspaceRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Link a group to a workspace using the workspace ID code."""
+    # Verify leader
+    m = db.query(GroupMembership).filter(
+        GroupMembership.group_id == group_id,
+        GroupMembership.user_id == current_user.id
+    ).first()
+    if not m or not m.is_leader:
+        raise HTTPException(status_code=403, detail="Only group leaders can connect the group to a workspace.")
+
+    grp = db.query(Group).filter(Group.id == group_id).first()
+    if not grp:
+        raise HTTPException(404, "Group not found")
+
+    ws = db.query(Workspace).filter(Workspace.workspace_id == body.workspace_code.strip()).first()
+    if not ws:
+        raise HTTPException(404, detail=f"No workspace found with ID '{body.workspace_code.strip()}'.")
+
+    # Check if already in this workspace
+    if grp.workspace_id == ws.id:
+        raise HTTPException(400, detail="This group is already connected to this workspace.")
+
+    # Assign group to workspace and generate group_number
+    existing_groups = db.query(Group).filter(Group.workspace_id == ws.id).all()
+    max_num = 0
+    for eg in existing_groups:
+        if eg.group_number and eg.group_number.startswith("G"):
+            try:
+                num = int(eg.group_number[1:])
+                if num > max_num:
+                    max_num = num
+            except ValueError:
+                pass
+    grp.group_number = f"G{max_num + 1}"
+    grp.workspace_id = ws.id
+
+    # Auto-ensure workspace access for all group members
+    for gm in grp.memberships:
+        existing_acc = db.query(WorkspaceAccess).filter(
+            WorkspaceAccess.workspace_id == ws.id,
+            WorkspaceAccess.user_id == gm.user_id
+        ).first()
+        if not existing_acc:
+            acc = WorkspaceAccess(
+                workspace_id=ws.id,
+                user_id=gm.user_id,
+                status="APPROVED",
+                requested_at=datetime.utcnow(),
+                processed_at=datetime.utcnow()
+            )
+            db.add(acc)
+
+    db.commit()
+    db.refresh(grp)
+
+    return {
+        "success": True,
+        "message": f"Group '{grp.name}' joined workspace '{ws.name}' ({ws.workspace_id}) as {grp.group_number}.",
+        "group_number": grp.group_number,
+        "workspace_id": ws.id,
+        "workspace_code": ws.workspace_id,
+        "workspace_name": ws.name,
+        "course_code": ws.course_code
+    }
+
+
 @router.get("/groups/{group_id}")
 def get_group(
     group_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Single group with members and projects."""
+    """Single group with members, projects, and workspace association."""
     grp = db.query(Group).filter(Group.id == group_id).first()
     if not grp:
         raise HTTPException(404, "Group not found")
@@ -1122,15 +1356,16 @@ def get_group(
     projects = db.query(Project).filter(Project.group_id == group_id).all()
     project_list = [_project_dict(p) for p in projects]
 
-    wgs = db.query(WorkspaceGroup).filter(WorkspaceGroup.group_id == grp.id, WorkspaceGroup.status == "APPROVED").all()
-    workspace_ids = [wg.workspace_id for wg in wgs]
-    ws = db.query(Workspace).filter(Workspace.id == workspace_ids[0]).first() if workspace_ids else None
+    ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first() if grp.workspace_id else None
 
     return {
         "id": grp.id,
-        "workspace_id": workspace_ids[0] if workspace_ids else None,
-        "workspace_ids": workspace_ids,
-        "workspace_name": ws.name if ws else "",
+        "workspace_id": grp.workspace_id,
+        "workspace_code": ws.workspace_id if ws else None,
+        "workspace_name": ws.name if ws else None,
+        "course_code": ws.course_code if ws else None,
+        "course_name": ws.course_name if ws else None,
+        "group_number": grp.group_number,
         "name": grp.name,
         "code": grp.code,
         "description": grp.description,

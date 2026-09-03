@@ -11,10 +11,26 @@ import urllib.request
 
 BASE_URL = "http://localhost:8000"
 
-def fetch_data(path):
+def login(email, password):
+    try:
+        url = f"{BASE_URL}/api/auth/login"
+        data = json.dumps({"email": email, "password": password}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as response:
+            res = json.loads(response.read().decode("utf-8"))
+            if res.get("success"):
+                return res.get("token")
+    except Exception as e:
+        print(f"Login failed for {email}: {e}")
+    return None
+
+def fetch_data(path, token=None):
     try:
         url = f"{BASE_URL}{path}"
-        req = urllib.request.Request(url, headers={"Content-Type": "application/json"})
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req) as response:
             return json.loads(response.read().decode("utf-8"))
     except Exception as e:
@@ -52,8 +68,7 @@ def render_sidebar(role):
         sb.append(f'      <li><a href="{path}" class="{cls}"><span class="sidebar__icon">{icon}</span><span>{label}</span></a></li>')
         
     sb.extend(['    </ul>',
-               '    <div class="sidebar__section-label">DSA Engines</div>',
-               '    <ul class="sidebar__nav">'])
+               '    <ul class="sidebar__nav" style="margin-top: 16px;">'])
                
     for icon, label, path, active in dsa_items:
         cls = "sidebar__link sidebar__link--active" if active else "sidebar__link"
@@ -316,11 +331,14 @@ def assemble_dom(user_name, role, user_id, stats):
 </html>"""
 
 def generate():
+    staff_token = login("s.mitchell@university.edu", "staff123")
+    student_token = login("alex.chen@university.edu", "student123")
+
     # 1. Fetch Staff statistics (user_id=1, role=STAFF)
-    staff_stats = fetch_data("/api/dashboard?user_id=1&role=STAFF")
+    staff_stats = fetch_data("/api/dashboard?user_id=1&role=STAFF", token=staff_token)
     
     # 2. Fetch Student statistics (user_id=2, role=STUDENT)
-    student_stats = fetch_data("/api/dashboard?user_id=2&role=STUDENT")
+    student_stats = fetch_data("/api/dashboard?user_id=2&role=STUDENT", token=student_token)
     
     if not staff_stats or not student_stats:
         print("Backend server must be running to fetch actual stats. Aborting DOM creation.")

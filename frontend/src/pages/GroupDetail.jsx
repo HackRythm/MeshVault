@@ -18,6 +18,13 @@ export default function GroupDetail() {
 
   // Modals state
   const [showProjectModal, setShowProjectModal] = useState(false);
+  const [showJoinWsModal, setShowJoinWsModal] = useState(false);
+
+  // Workspace Join state
+  const [joinWsCode, setJoinWsCode] = useState('');
+  const [joinWsError, setJoinWsError] = useState('');
+  const [joinWsSuccess, setJoinWsSuccess] = useState('');
+  const [joinWsSubmitting, setJoinWsSubmitting] = useState(false);
 
   // Form states
   const [projId, setProjId] = useState('');
@@ -45,6 +52,29 @@ export default function GroupDetail() {
   useEffect(() => {
     fetchGroupDetail();
   }, [id]);
+
+  const handleJoinWorkspace = async (e) => {
+    e.preventDefault();
+    if (!joinWsCode.trim()) {
+      setJoinWsError('Please enter a Workspace ID (e.g. WS-001).');
+      return;
+    }
+
+    setJoinWsError('');
+    setJoinWsSuccess('');
+    setJoinWsSubmitting(true);
+    try {
+      const res = await groupService.joinWorkspace(id, joinWsCode.trim());
+      setJoinWsSuccess(res.message || 'Group joined workspace successfully!');
+      setJoinWsCode('');
+      await fetchGroupDetail();
+      setTimeout(() => setShowJoinWsModal(false), 1200);
+    } catch (err) {
+      setJoinWsError(err.message || 'Failed to join workspace.');
+    } finally {
+      setJoinWsSubmitting(false);
+    }
+  };
 
   const handleCreateProject = async (e) => {
     e.preventDefault();
@@ -190,16 +220,47 @@ export default function GroupDetail() {
     <AppLayout title={`Groups / ${group.name}`}>
       <div className="page-header">
         <div className="page-header__left">
-          <h1 className="page-header__title">{group.name}</h1>
-          <p className="page-header__subtitle">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h1 className="page-header__title" style={{ margin: 0 }}>{group.name}</h1>
+            {group.group_number && (
+              <span className="badge badge--neutral" style={{ fontSize: '13px', padding: '3px 8px' }}>
+                {group.group_number}
+              </span>
+            )}
+            {group.workspace_id ? (
+              <span className="badge badge--success" style={{ fontSize: '12px' }}>
+                ✓ {group.workspace_code || `WS-${group.workspace_id}`}: {group.workspace_name}
+              </span>
+            ) : (
+              <span className="badge badge--muted" style={{ fontSize: '12px' }}>
+                ⚠️ No Workspace Linked
+              </span>
+            )}
+          </div>
+          <p className="page-header__subtitle" style={{ marginTop: '6px' }}>
             Group Code: <code style={{ background: 'var(--bg-card-hover)', padding: '2px 6px', borderRadius: '4px', marginRight: '8px' }}>{group.code}</code>
             {user.role === 'STUDENT' && (
               <button onClick={copyCodeToClipboard} className="btn btn--ghost btn--sm" style={{ padding: '2px 6px' }}>📋 Copy</button>
             )}
           </p>
         </div>
-        <div className="page-header__actions" style={{ display: 'flex', gap: '12px' }}>
+        <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <Link to="/groups" className="btn btn--secondary">⬅️ Back</Link>
+          
+          {/* ONLY show Join Workspace button if group is NOT yet in a workspace */}
+          {!group.workspace_id && user.role === 'STUDENT' && isUserLeader && (
+            <button
+              onClick={() => {
+                setJoinWsError('');
+                setJoinWsSuccess('');
+                setShowJoinWsModal(true);
+              }}
+              className="btn btn--primary"
+            >
+              🔗 Join Workspace
+            </button>
+          )}
+
           {user.role === 'STUDENT' && (
             <>
               {isUserLeader ? (
@@ -211,6 +272,7 @@ export default function GroupDetail() {
           )}
         </div>
       </div>
+
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '24px', alignItems: 'start' }}>
         {/* Members column */}
@@ -287,6 +349,33 @@ export default function GroupDetail() {
 
         {/* Projects column */}
         <div className="detail-section">
+          {/* Workspace Status Banner if not connected */}
+          {!group.workspace_id && (
+            <div className="card mb-20 p-16" style={{ border: '1px solid rgba(99, 102, 241, 0.3)', background: 'rgba(99, 102, 241, 0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 'var(--radius)' }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '2px', color: 'var(--text-primary)' }}>
+                  🔗 Link this Group to an Academic Workspace
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  This group is currently standalone. Join an Academic Workspace using your course Workspace ID (e.g. WS-001).
+                </div>
+              </div>
+              {user.role === 'STUDENT' && isUserLeader && (
+                <button
+                  onClick={() => {
+                    setJoinWsError('');
+                    setJoinWsSuccess('');
+                    setShowJoinWsModal(true);
+                  }}
+                  className="btn btn--primary btn--sm"
+                  style={{ whiteSpace: 'nowrap', marginLeft: '16px' }}
+                >
+                  🔗 Join Workspace
+                </button>
+              )}
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h2 className="detail-section__title" style={{ margin: 0 }}>Group Projects ({group.projects?.length || 0})</h2>
             {user.role === 'STUDENT' && (
@@ -421,6 +510,50 @@ export default function GroupDetail() {
                 <button type="button" onClick={() => setShowProjectModal(false)} className="btn btn--secondary" disabled={submitting}>Cancel</button>
                 <button type="submit" className="btn btn--primary" disabled={submitting}>
                   {submitting ? 'Adding...' : 'Add Project'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Join Workspace Modal for this Group */}
+      {showJoinWsModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowJoinWsModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-16">
+              <h3 className="modal__title" style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
+                🔗 Connect Group to Workspace
+              </h3>
+              <button onClick={() => setShowJoinWsModal(false)} className="btn btn--ghost btn--sm">✕</button>
+            </div>
+
+            {joinWsError && <div className="login-card__error mb-16">{joinWsError}</div>}
+            {joinWsSuccess && <div className="badge badge--success mb-16 p-12" style={{ display: 'block', textAlign: 'center' }}>{joinWsSuccess}</div>}
+
+            <form onSubmit={handleJoinWorkspace}>
+              <div className="form-group mb-20">
+                <label className="form-label">Workspace ID *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={joinWsCode}
+                  onChange={(e) => setJoinWsCode(e.target.value)}
+                  placeholder="e.g. WS-001 or WS-ADSA-204"
+                  required
+                  autoFocus
+                />
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                  Enter the course Workspace ID to link <strong>{group.name}</strong> to that academic workspace.
+                </span>
+              </div>
+
+              <div className="flex gap-12" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowJoinWsModal(false)} className="btn btn--secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={joinWsSubmitting}>
+                  {joinWsSubmitting ? 'Linking Group...' : 'Link to Workspace'}
                 </button>
               </div>
             </form>

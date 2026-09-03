@@ -48,8 +48,7 @@ export default function Sidebar() {
           ))}
         </ul>
 
-        <div className="sidebar__section-label">DSA Engines</div>
-        <ul className="sidebar__nav">
+        <ul className="sidebar__nav" style={{ marginTop: '16px' }}>
           {buildingItems.map((item) => (
             <li key={item.path}>
               <NavLink

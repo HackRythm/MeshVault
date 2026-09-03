@@ -8,6 +8,7 @@ export default function CreateWorkspace() {
   const { user } = useAuth();
   const navigate = useNavigate();
   
+  const [workspaceId, setWorkspaceId] = useState('');
   const [name, setName] = useState('');
   const [courseCode, setCourseCode] = useState('');
   const [courseName, setCourseName] = useState('');
@@ -29,6 +30,7 @@ export default function CreateWorkspace() {
 
     try {
       const data = {
+        workspace_id: workspaceId.trim() || undefined,
         name: name.trim(),
         course_code: courseCode.trim(),
         course_name: courseName.trim(),
@@ -45,6 +47,24 @@ export default function CreateWorkspace() {
     }
   };
 
+  if (user?.role !== 'STAFF') {
+    return (
+      <AppLayout title="Access Denied">
+        <div className="card p-24 text-center" style={{ maxWidth: '580px', margin: '40px auto', textAlign: 'center' }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
+          <h2 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '12px' }}>Staff Access Only</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '14px', lineHeight: '1.6', marginBottom: '24px' }}>
+            Only <strong>Faculty/Staff</strong> accounts can create academic workspaces.<br />
+            Students can join workspaces created by instructors using the <strong>Workspace ID</strong>.
+          </p>
+          <Link to="/workspace" className="btn btn--primary">
+            ← Back to Workspaces
+          </Link>
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout title="New Workspace">
       <div className="page-header">
@@ -60,17 +80,30 @@ export default function CreateWorkspace() {
       <div className="card" style={{ maxWidth: '720px' }}>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
-          <div className="form-group">
-            <label className="form-label">Workspace Name *</label>
-            <input 
-              type="text" 
-              className="form-input" 
-              value={name} 
-              onChange={(e) => setName(e.target.value)} 
-              required 
-              placeholder="e.g. DSA Lecture Hall Workspace" 
-            />
+          <div className="grid grid--2" style={{ gap: '20px' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Workspace ID</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                value={workspaceId} 
+                onChange={(e) => setWorkspaceId(e.target.value)} 
+                placeholder="e.g. WS-001 or WS-DSA-2025 (Optional: auto-assigned if blank)" 
+              />
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Workspace Name *</label>
+              <input 
+                type="text" 
+                className="form-input" 
+                value={name} 
+                onChange={(e) => setName(e.target.value)} 
+                required 
+                placeholder="e.g. DSA Lecture Hall Workspace" 
+              />
+            </div>
           </div>
+
 
           <div className="grid grid--2" style={{ gap: '20px' }}>
             <div className="form-group" style={{ marginBottom: 0 }}>

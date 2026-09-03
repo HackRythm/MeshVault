@@ -22,6 +22,14 @@ export default function Workspace() {
   // Modals state
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [showSchemeModal, setShowSchemeModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+
+  // Join workspace state (Student)
+  const [joinWsCode, setJoinWsCode] = useState('');
+  const [joinSubmitting, setJoinSubmitting] = useState(false);
+  const [joinError, setJoinError] = useState('');
+  const [joinSuccess, setJoinSuccess] = useState('');
+
 
   // Access modal state
   const [isRestricted, setIsRestricted] = useState(false);
@@ -199,6 +207,35 @@ export default function Workspace() {
     }
   };
 
+  const handleJoinWorkspace = async (e) => {
+    e.preventDefault();
+    if (!joinWsCode.trim()) {
+      setJoinError('Please enter a Workspace ID (e.g. WS-001).');
+      return;
+    }
+
+    setJoinError('');
+    setJoinSuccess('');
+    setJoinSubmitting(true);
+
+    try {
+      const res = await workspaceService.joinWorkspace(joinWsCode.trim());
+      setJoinSuccess(res.message || 'Join request submitted! Awaiting staff approval.');
+      setJoinWsCode('');
+      // Reload workspaces
+      const list = await workspaceService.getWorkspaces(user.id, user.role);
+      setWorkspaces(list);
+      if (list.length > 0 && !selectedWs) {
+        setSelectedWs(list[0]);
+      }
+    } catch (err) {
+      setJoinError(err.message || 'Failed to submit join request.');
+    } finally {
+      setJoinSubmitting(false);
+    }
+  };
+
+
   const handleAddCriterion = (e) => {
     e.preventDefault();
     if (!newCritName.trim()) {
@@ -325,13 +362,81 @@ export default function Workspace() {
             <h1 className="page-header__title">Workspace</h1>
             <p className="page-header__subtitle">No active workspaces assigned.</p>
           </div>
-          {user.role === 'STAFF' && (
+          {user.role === 'STAFF' ? (
             <Link to="/workspace/new" className="btn btn--secondary">
               ➕ New Workspace
             </Link>
+          ) : (
+            <button
+              onClick={() => {
+                setShowJoinModal(true);
+                setJoinError('');
+                setJoinSuccess('');
+              }}
+              className="btn btn--primary"
+            >
+              🔗 Join Workspace
+            </button>
           )}
         </div>
         <EmptyState icon="📂" title="No workspaces assigned" text="You do not have access to any workspaces at the moment." />
+        
+        {user.role === 'STUDENT' && (
+          <div style={{ textAlign: 'center', marginTop: '-16px', marginBottom: '32px' }}>
+            <button
+              onClick={() => {
+                setShowJoinModal(true);
+                setJoinError('');
+                setJoinSuccess('');
+              }}
+              className="btn btn--primary"
+            >
+              🔗 Enter Workspace ID to Join
+            </button>
+          </div>
+        )}
+
+        {/* Join Workspace Modal for Students */}
+        {showJoinModal && (
+          <div style={modalOverlayStyle} onClick={() => setShowJoinModal(false)}>
+            <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-center mb-16">
+                <h3 className="modal__title">🔗 Join Academic Workspace</h3>
+                <button onClick={() => setShowJoinModal(false)} className="btn btn--ghost btn--sm">✕</button>
+              </div>
+
+              {joinError && <div className="login-card__error mb-16">{joinError}</div>}
+              {joinSuccess && <div className="badge badge--success mb-16 p-12" style={{ display: 'block', textAlign: 'center' }}>{joinSuccess}</div>}
+
+              <form onSubmit={handleJoinWorkspace}>
+                <div className="form-group mb-20">
+                  <label className="form-label">Workspace ID *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={joinWsCode}
+                    onChange={(e) => setJoinWsCode(e.target.value)}
+                    placeholder="e.g. WS-001 or WS-DSA-2025"
+                    required
+                    autoFocus
+                  />
+                  <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                    Obtain the Workspace ID from your instructor or course syllabus.
+                  </span>
+                </div>
+
+                <div className="flex gap-12" style={{ justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowJoinModal(false)} className="btn btn--secondary">
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn--primary" disabled={joinSubmitting}>
+                    {joinSubmitting ? 'Submitting Request...' : 'Submit Join Request'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </AppLayout>
     );
   }
@@ -365,6 +470,18 @@ export default function Workspace() {
           )}
         </div>
         <div className="flex gap-12">
+          {user.role === 'STUDENT' && (
+            <button
+              onClick={() => {
+                setShowJoinModal(true);
+                setJoinError('');
+                setJoinSuccess('');
+              }}
+              className="btn btn--secondary"
+            >
+              🔗 Join Another Workspace
+            </button>
+          )}
           {selectedWs && user.role === 'STAFF' && (
             <>
               <button onClick={() => {
@@ -451,6 +568,72 @@ export default function Workspace() {
 
           {activeTab === 'overview' || user.role !== 'STAFF' ? (
             <>
+              {/* Pending Join Requests (Staff Only) */}
+              {user.role === 'STAFF' && wsDetail?.pending_requests?.length > 0 && (
+                <div className="detail-section mb-24" style={{ border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 'var(--radius)', padding: '20px', background: 'rgba(245, 158, 11, 0.03)' }}>
+                  <h2 className="detail-section__title" style={{ color: 'var(--clr-warning)', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: 'none', paddingBottom: 0 }}>
+                    ⏳ Pending Student Join Requests ({wsDetail.pending_requests.length})
+                  </h2>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
+                    The following students have submitted requests to join this workspace.
+                  </p>
+                  <div className="card p-0" style={{ overflow: 'hidden' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Student Name</th>
+                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Email</th>
+                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Requested At</th>
+                          <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {wsDetail.pending_requests.map((req) => (
+                          <tr key={req.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '12px 16px', fontWeight: '500' }}>{req.user_name}</td>
+                            <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{req.user_email}</td>
+                            <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                              {req.requested_at ? new Date(req.requested_at).toLocaleDateString() : 'Just now'}
+                            </td>
+                            <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await workspaceService.approveJoinRequest(selectedWs.id, req.id);
+                                    const detail = await workspaceService.getWorkspace(selectedWs.id, user.id, user.role);
+                                    setWsDetail(detail);
+                                  } catch (e) {
+                                    alert(e.message || 'Failed to approve');
+                                  }
+                                }}
+                                className="btn btn--primary btn--sm"
+                                style={{ marginRight: '8px' }}
+                              >
+                                ✓ Approve
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await workspaceService.rejectJoinRequest(selectedWs.id, req.id);
+                                    const detail = await workspaceService.getWorkspace(selectedWs.id, user.id, user.role);
+                                    setWsDetail(detail);
+                                  } catch (e) {
+                                    alert(e.message || 'Failed to reject');
+                                  }
+                                }}
+                                className="btn btn--secondary btn--sm"
+                              >
+                                ✕ Reject
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {/* Groups Section */}
               <div className="detail-section">
                 <h2 className="detail-section__title">Class Groups ({wsDetail?.groups?.length || 0})</h2>
@@ -829,6 +1012,48 @@ export default function Workspace() {
                 {schemeSaving ? 'Saving Scheme...' : 'Save Scheme'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Join Workspace Modal for Students */}
+      {showJoinModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowJoinModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-16">
+              <h3 className="modal__title">🔗 Join Academic Workspace</h3>
+              <button onClick={() => setShowJoinModal(false)} className="btn btn--ghost btn--sm">✕</button>
+            </div>
+
+            {joinError && <div className="login-card__error mb-16">{joinError}</div>}
+            {joinSuccess && <div className="badge badge--success mb-16 p-12" style={{ display: 'block', textAlign: 'center' }}>{joinSuccess}</div>}
+
+            <form onSubmit={handleJoinWorkspace}>
+              <div className="form-group mb-20">
+                <label className="form-label">Workspace ID *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={joinWsCode}
+                  onChange={(e) => setJoinWsCode(e.target.value)}
+                  placeholder="e.g. WS-001 or WS-DSA-2025"
+                  required
+                  autoFocus
+                />
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                  Obtain the Workspace ID from your instructor or course syllabus.
+                </span>
+              </div>
+
+              <div className="flex gap-12" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowJoinModal(false)} className="btn btn--secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={joinSubmitting}>
+                  {joinSubmitting ? 'Submitting Request...' : 'Submit Join Request'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

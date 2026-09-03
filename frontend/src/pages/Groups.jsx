@@ -5,32 +5,48 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import EmptyState from '../components/EmptyState';
 import GroupCard from '../components/GroupCard';
 import groupService from '../services/groupService';
+import workspaceService from '../services/workspaceService';
 import { useAuth } from '../context/AuthContext';
 
 export default function Groups() {
   const { user } = useAuth();
   const [groups, setGroups] = useState([]);
+  const [workspaces, setWorkspaces] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showJoinGroupModal, setShowJoinGroupModal] = useState(false);
+  const [showJoinWsModal, setShowJoinWsModal] = useState(false);
 
-  // Form states
+  // Group Form states
+  const [manualWorkspaceCode, setManualWorkspaceCode] = useState('');
   const [groupName, setGroupName] = useState('');
   const [groupCode, setGroupCode] = useState('');
   const [groupDesc, setGroupDesc] = useState('');
-  const [joinCode, setJoinCode] = useState('');
+
+  // Join Group state
+  const [groupJoinCode, setGroupJoinCode] = useState('');
+
+  // Join Workspace state
+  const [joinWsCode, setJoinWsCode] = useState('');
+  const [joinWsError, setJoinWsError] = useState('');
+  const [joinWsSuccess, setJoinWsSuccess] = useState('');
+  const [joinWsSubmitting, setJoinWsSubmitting] = useState(false);
 
   const [modalError, setModalError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchGroups = async () => {
+  const fetchData = async () => {
     try {
       setLoading(true);
-      const list = await groupService.getGroups(null, user.id, user.role);
-      setGroups(list);
+      const [groupsList, wsList] = await Promise.all([
+        groupService.getGroups(null, user.id, user.role),
+        workspaceService.getWorkspaces(user.id, user.role),
+      ]);
+      setGroups(groupsList || []);
+      setWorkspaces(wsList || []);
     } catch (err) {
       setError(err.message || 'Failed to fetch groups.');
     } finally {
@@ -39,25 +55,31 @@ export default function Groups() {
   };
 
   useEffect(() => {
-    fetchGroups();
+    fetchData();
   }, [user]);
 
   const handleCreateGroup = async (e) => {
     e.preventDefault();
-    if (!groupName || !groupCode) {
-      setModalError('Group Name and Join Code are required.');
+    if (!groupName.trim()) {
+      setModalError('Group Name is required.');
       return;
     }
 
     setModalError('');
     setSubmitting(true);
     try {
-      await groupService.createGroup(groupName.trim(), groupCode.trim(), groupDesc.trim());
+      await groupService.createGroup(
+        groupName.trim(),
+        groupCode.trim() || undefined,
+        groupDesc.trim() || undefined,
+        manualWorkspaceCode.trim() || undefined
+      );
       setShowCreateModal(false);
       setGroupName('');
       setGroupCode('');
       setGroupDesc('');
-      await fetchGroups();
+      setManualWorkspaceCode('');
+      await fetchData();
     } catch (err) {
       setModalError(err.message || 'Failed to create group.');
     } finally {
@@ -67,7 +89,7 @@ export default function Groups() {
 
   const handleJoinGroup = async (e) => {
     e.preventDefault();
-    if (!joinCode) {
+    if (!groupJoinCode) {
       setModalError('Please enter a Group Join Code.');
       return;
     }
@@ -75,14 +97,36 @@ export default function Groups() {
     setModalError('');
     setSubmitting(true);
     try {
-      await groupService.joinGroup(joinCode.trim());
-      setShowJoinModal(false);
-      setJoinCode('');
-      await fetchGroups();
+      await groupService.joinGroup(groupJoinCode.trim());
+      setShowJoinGroupModal(false);
+      setGroupJoinCode('');
+      await fetchData();
     } catch (err) {
       setModalError(err.message || 'Failed to join group.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleJoinWorkspace = async (e) => {
+    e.preventDefault();
+    if (!joinWsCode.trim()) {
+      setJoinWsError('Please enter a Workspace ID (e.g. WS-001).');
+      return;
+    }
+
+    setJoinWsError('');
+    setJoinWsSuccess('');
+    setJoinWsSubmitting(true);
+    try {
+      const res = await workspaceService.joinWorkspace(joinWsCode.trim());
+      setJoinWsSuccess(res.message || 'Join request submitted! Awaiting staff approval.');
+      setJoinWsCode('');
+      await fetchData();
+    } catch (err) {
+      setJoinWsError(err.message || 'Failed to submit workspace join request.');
+    } finally {
+      setJoinWsSubmitting(false);
     }
   };
 
@@ -106,7 +150,7 @@ export default function Groups() {
     border: '1px solid var(--border)',
     borderRadius: 'var(--radius)',
     width: '100%',
-    maxWidth: '500px',
+    maxWidth: '520px',
     maxHeight: '85vh',
     overflowY: 'auto',
     boxShadow: 'var(--shadow-lg)',
@@ -129,12 +173,15 @@ export default function Groups() {
         <div className="page-header__left">
           <h1 className="page-header__title">Class Groups</h1>
           <p className="page-header__subtitle">
-            {user.role === 'STAFF' ? 'View and track all student groups.' : 'Create, join, or view your independent project teams.'}
+            {user.role === 'STAFF' ? 'View and track all student groups across workspaces.' : 'Create, join, or view your workspace project teams.'}
           </p>
         </div>
         {user.role === 'STUDENT' && (
-          <div className="page-header__actions" style={{ display: 'flex', gap: '12px' }}>
-            <button onClick={() => { setModalError(''); setShowJoinModal(true); }} className="btn btn--secondary">
+          <div className="page-header__actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button onClick={() => { setJoinWsError(''); setJoinWsSuccess(''); setShowJoinWsModal(true); }} className="btn btn--secondary" style={{ borderColor: 'var(--clr-primary)', color: 'var(--clr-primary)' }}>
+              🔗 Join Workspace
+            </button>
+            <button onClick={() => { setModalError(''); setShowJoinGroupModal(true); }} className="btn btn--secondary">
               🚪 Join Group
             </button>
             <button onClick={() => { setModalError(''); setShowCreateModal(true); }} className="btn btn--primary">
@@ -153,56 +200,142 @@ export default function Groups() {
           ))}
         </div>
       ) : (
-        <EmptyState icon="👥" title="No groups assigned" text="There are currently no active teams found for your account. Join or create one above!" />
+        <div>
+          <EmptyState
+            icon="👥"
+            title="No groups formed yet"
+            text="Form a group with your peers first, or join an existing team!"
+          />
+          {user.role === 'STUDENT' && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: '-12px', marginBottom: '32px' }}>
+              <button onClick={() => { setModalError(''); setShowCreateModal(true); }} className="btn btn--primary">
+                ➕ Create Group
+              </button>
+              <button onClick={() => { setModalError(''); setShowJoinGroupModal(true); }} className="btn btn--secondary">
+                🚪 Join Group
+              </button>
+              <button onClick={() => { setJoinWsError(''); setJoinWsSuccess(''); setShowJoinWsModal(true); }} className="btn btn--secondary">
+                🔗 Join Workspace
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* Create Group Modal */}
+      {/* ─── Join Workspace Modal ─── */}
+      {showJoinWsModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowJoinWsModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-16">
+              <h3 className="modal__title" style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>🔗 Join Academic Workspace</h3>
+              <button onClick={() => setShowJoinWsModal(false)} className="btn btn--ghost btn--sm">✕</button>
+            </div>
+
+            {joinWsError && <div className="login-card__error mb-16">{joinWsError}</div>}
+            {joinWsSuccess && <div className="badge badge--success mb-16 p-12" style={{ display: 'block', textAlign: 'center' }}>{joinWsSuccess}</div>}
+
+            <form onSubmit={handleJoinWorkspace}>
+              <div className="form-group mb-20">
+                <label className="form-label">Workspace ID *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={joinWsCode}
+                  onChange={(e) => setJoinWsCode(e.target.value)}
+                  placeholder="e.g. WS-001 or WS-DSA-2025"
+                  required
+                  autoFocus
+                />
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                  Enter the Workspace ID provided by your instructor to request membership.
+                </span>
+              </div>
+
+              <div className="flex gap-12" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowJoinWsModal(false)} className="btn btn--secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={joinWsSubmitting}>
+                  {joinWsSubmitting ? 'Submitting Request...' : 'Submit Join Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Create Group Modal ─── */}
       {showCreateModal && (
-        <div style={modalOverlayStyle}>
-          <div style={modalContentStyle}>
+        <div style={modalOverlayStyle} onClick={() => setShowCreateModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)' }}>Create New Group</h2>
+              <h2 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>Create New Group</h2>
               <button onClick={() => setShowCreateModal(false)} className="btn btn--ghost btn--sm">✕</button>
             </div>
             {modalError && <div className="login-card__error mb-16">{modalError}</div>}
+            
             <form onSubmit={handleCreateGroup}>
+              <div className="form-group mb-16">
+                <label className="form-label" htmlFor="manualWorkspaceCode">Academic Workspace ID (Optional)</label>
+                <input
+                  id="manualWorkspaceCode"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. WS-001 or WS-ADSA-204 (Optional: leave blank to join later)"
+                  value={manualWorkspaceCode}
+                  onChange={(e) => setManualWorkspaceCode(e.target.value)}
+                  disabled={submitting}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Enter the Workspace ID to link your group directly to a course environment, or leave blank to join later.
+                </span>
+              </div>
+
+
               <div className="form-group mb-16">
                 <label className="form-label" htmlFor="groupName">Group Name *</label>
                 <input
                   id="groupName"
                   type="text"
-                  className="form-control"
-                  placeholder="e.g. Group A11"
+                  className="form-input"
+                  placeholder="e.g. Team Alpha"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
                   disabled={submitting}
+                  required
+                  autoFocus
                 />
               </div>
+
               <div className="form-group mb-16">
-                <label className="form-label" htmlFor="groupCode">Unique Group Code *</label>
+                <label className="form-label" htmlFor="groupCode">Unique Group Join Code (Optional)</label>
                 <input
                   id="groupCode"
                   type="text"
-                  className="form-control"
-                  placeholder="e.g. A11-X7K92P"
+                  className="form-input"
+                  placeholder="e.g. ALPHA-X7K92P (Optional: auto-assigned if blank)"
                   value={groupCode}
                   onChange={(e) => setGroupCode(e.target.value)}
                   disabled={submitting}
                 />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Other students will enter this code to join your group.</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Other students will enter this code to join your group.
+                </span>
               </div>
+
               <div className="form-group mb-24">
                 <label className="form-label" htmlFor="groupDesc">Description</label>
                 <textarea
                   id="groupDesc"
-                  className="form-control"
+                  className="form-textarea"
                   rows="3"
-                  placeholder="Describe your group's focus..."
+                  placeholder="Describe your group's focus or lab assignments..."
                   value={groupDesc}
                   onChange={(e) => setGroupDesc(e.target.value)}
                   disabled={submitting}
                 />
               </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                 <button type="button" onClick={() => setShowCreateModal(false)} className="btn btn--secondary" disabled={submitting}>Cancel</button>
                 <button type="submit" className="btn btn--primary" disabled={submitting}>
@@ -214,13 +347,14 @@ export default function Groups() {
         </div>
       )}
 
-      {/* Join Group Modal */}
-      {showJoinModal && (
-        <div style={modalOverlayStyle}>
-          <div style={modalContentStyle}>
+
+      {/* ─── Join Group Modal ─── */}
+      {showJoinGroupModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowJoinGroupModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)' }}>Join Group</h2>
-              <button onClick={() => setShowJoinModal(false)} className="btn btn--ghost btn--sm">✕</button>
+              <h2 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>Join Group</h2>
+              <button onClick={() => setShowJoinGroupModal(false)} className="btn btn--ghost btn--sm">✕</button>
             </div>
             {modalError && <div className="login-card__error mb-16">{modalError}</div>}
             <form onSubmit={handleJoinGroup}>
@@ -229,15 +363,17 @@ export default function Groups() {
                 <input
                   id="joinCode"
                   type="text"
-                  className="form-control"
-                  placeholder="e.g. A11-X7K92P"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
+                  className="form-input"
+                  placeholder="e.g. ALPHA-X7K92P"
+                  value={groupJoinCode}
+                  onChange={(e) => setGroupJoinCode(e.target.value)}
                   disabled={submitting}
+                  required
+                  autoFocus
                 />
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                <button type="button" onClick={() => setShowJoinModal(false)} className="btn btn--secondary" disabled={submitting}>Cancel</button>
+                <button type="button" onClick={() => setShowJoinGroupModal(false)} className="btn btn--secondary" disabled={submitting}>Cancel</button>
                 <button type="submit" className="btn btn--primary" disabled={submitting}>
                   {submitting ? 'Joining...' : 'Join Group'}
                 </button>
