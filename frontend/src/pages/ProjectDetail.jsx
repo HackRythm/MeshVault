@@ -1,3 +1,9 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
+import AppLayout from '../layouts/AppLayout';
+import LoadingSpinner from '../components/LoadingSpinner';
+import projectService from '../services/projectService';
+import { useAuth } from '../context/AuthContext';
 import StudentGradingPanel from '../components/StudentGradingPanel';
 
 export default function ProjectDetail() {
