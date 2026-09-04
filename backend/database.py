@@ -14,7 +14,8 @@ if not DATABASE_URL:
     if "VERCEL" in os.environ:
         DATABASE_URL = "sqlite:////tmp/meshvault.db"
     else:
-        DATABASE_URL = "sqlite:///./meshvault.db"
+        db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "meshvault.db")).replace("\\", "/")
+        DATABASE_URL = f"sqlite:///{db_path}"
 
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)

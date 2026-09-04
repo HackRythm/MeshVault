@@ -374,10 +374,15 @@ def join_workspace(
     if current_user.role != "STUDENT":
         raise HTTPException(status_code=403, detail="Only students can request to join workspaces.")
 
-    # Lookup workspace by workspace_id (WS-xxx format)
-    ws = db.query(Workspace).filter(Workspace.workspace_id == body.workspace_code).first()
+    # Lookup workspace by workspace_id or join_code
+    ws_code = body.workspace_code.strip()
+    from sqlalchemy import func
+    ws = db.query(Workspace).filter(
+        (func.lower(Workspace.workspace_id) == ws_code.lower()) |
+        (func.lower(Workspace.join_code) == ws_code.lower())
+    ).first()
     if not ws:
-        raise HTTPException(404, detail="No workspace found with that ID code.")
+        raise HTTPException(404, detail=f"No workspace found with code '{ws_code}'.")
 
     # Check if student already has access or a pending request
     existing = db.query(WorkspaceAccess).filter(
@@ -1000,9 +1005,14 @@ def create_group(
 
     # If workspace_code was manually entered, look it up
     if body.workspace_code and body.workspace_code.strip():
-        ws = db.query(Workspace).filter(Workspace.workspace_id == body.workspace_code.strip()).first()
+        ws_code = body.workspace_code.strip()
+        from sqlalchemy import func
+        ws = db.query(Workspace).filter(
+            (func.lower(Workspace.workspace_id) == ws_code.lower()) |
+            (func.lower(Workspace.join_code) == ws_code.lower())
+        ).first()
         if not ws:
-            raise HTTPException(status_code=404, detail=f"No workspace found with ID '{body.workspace_code.strip()}'.")
+            raise HTTPException(status_code=404, detail=f"No workspace found with code '{ws_code}'. Please verify the Workspace Code with your instructor.")
         target_ws_id = ws.id
 
     if target_ws_id:
@@ -1066,6 +1076,19 @@ def create_group(
         is_leader=True
     )
     db.add(membership)
+
+    # If linked to a workspace, create WorkspaceGroup record
+    if target_ws_id:
+        wg = WorkspaceGroup(
+            workspace_id=target_ws_id,
+            group_id=grp.id,
+            requested_by=current_user.id,
+            status="APPROVED",
+            requested_at=datetime.utcnow(),
+            approved_at=datetime.utcnow()
+        )
+        db.add(wg)
+
     db.commit()
 
     return {
