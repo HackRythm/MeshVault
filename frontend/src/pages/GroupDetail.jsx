@@ -504,12 +504,12 @@ export default function GroupDetail() {
                   id="projId"
                   type="text"
                   className="form-control"
-                  placeholder="e.g. aid-dsa-proj-1"
+                  placeholder="e.g. AID-ADSA-A11 or CS-DSA-01"
                   value={projId}
                   onChange={(e) => setProjId(e.target.value)}
                   disabled={submitting}
                 />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Must be lowercase, digits, dots, underscores, or dashes only.</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Unique project code for your project.</span>
               </div>
               <div className="form-group mb-16">
                 <label className="form-label" htmlFor="projName">Project Name *</label>
@@ -517,12 +517,12 @@ export default function GroupDetail() {
                   id="projName"
                   type="text"
                   className="form-control"
-                  placeholder="e.g. binary-search-tree-visualizer"
+                  placeholder="e.g. MeshVault or Search Visualizer"
                   value={projName}
                   onChange={(e) => setProjName(e.target.value)}
                   disabled={submitting}
                 />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Must be lowercase, digits, dots, underscores, or dashes only.</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Descriptive title of the project.</span>
               </div>
               <div className="form-group mb-16">
                 <label className="form-label" htmlFor="projCourse">Course / Subject</label>

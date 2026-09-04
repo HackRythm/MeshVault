@@ -113,14 +113,24 @@ class ProjectCreate(BaseModel):
     progress: float = 0.0
     deadline: Optional[date] = None
 
+    @field_validator("project_id")
+    @classmethod
+    def validate_project_id(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Project ID cannot be empty")
+        if len(v) > 60:
+            raise ValueError("Project ID must be 60 characters or less")
+        return v
+
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Project name cannot be empty")
         if len(v) > 100:
             raise ValueError("Project name must be 100 characters or less")
-        import re
-        if not re.match(r"^[a-z0-9._-]+$", v):
-            raise ValueError("Project name can only contain lowercase letters, digits, and '.', '_', '-'")
         return v
 
 
@@ -155,11 +165,11 @@ class ProjectUpdate(BaseModel):
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Project name cannot be empty")
             if len(v) > 100:
                 raise ValueError("Project name must be 100 characters or less")
-            import re
-            if not re.match(r"^[a-z0-9._-]+$", v):
-                raise ValueError("Project name can only contain lowercase letters, digits, and '.', '_', '-'")
         return v
 
 

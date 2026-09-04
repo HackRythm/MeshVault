@@ -28,7 +28,17 @@ async function request(endpoint, options = {}) {
     let message = `HTTP ${response.status}`;
     try {
       const body = await response.json();
-      message = body.detail || message;
+      if (body.detail) {
+        if (typeof body.detail === 'string') {
+          message = body.detail;
+        } else if (Array.isArray(body.detail)) {
+          message = body.detail.map(e => e.msg || e.message || JSON.stringify(e)).join(' | ');
+        } else if (typeof body.detail === 'object') {
+          message = body.detail.msg || body.detail.message || JSON.stringify(body.detail);
+        }
+      } else if (body.message) {
+        message = body.message;
+      }
     } catch { /* ignore parse errors */ }
     throw new Error(message);
   }
