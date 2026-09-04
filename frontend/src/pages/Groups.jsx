@@ -60,8 +60,8 @@ export default function Groups() {
 
   const handleCreateGroup = async (e) => {
     e.preventDefault();
-    if (!groupName.trim()) {
-      setModalError('Group Name is required.');
+    if (!groupName.trim() || !groupCode.trim()) {
+      setModalError('Group Name and Unique Group Code are required.');
       return;
     }
 
@@ -70,7 +70,7 @@ export default function Groups() {
     try {
       await groupService.createGroup(
         groupName.trim(),
-        groupCode.trim() || undefined,
+        groupCode.trim(),
         groupDesc.trim() || undefined,
         manualWorkspaceCode.trim() || undefined
       );
@@ -108,28 +108,6 @@ export default function Groups() {
     }
   };
 
-  const handleJoinWorkspace = async (e) => {
-    e.preventDefault();
-    if (!joinWsCode.trim()) {
-      setJoinWsError('Please enter a Workspace ID (e.g. WS-001).');
-      return;
-    }
-
-    setJoinWsError('');
-    setJoinWsSuccess('');
-    setJoinWsSubmitting(true);
-    try {
-      const res = await workspaceService.joinWorkspace(joinWsCode.trim());
-      setJoinWsSuccess(res.message || 'Join request submitted! Awaiting staff approval.');
-      setJoinWsCode('');
-      await fetchData();
-    } catch (err) {
-      setJoinWsError(err.message || 'Failed to submit workspace join request.');
-    } finally {
-      setJoinWsSubmitting(false);
-    }
-  };
-
   const modalOverlayStyle = {
     position: 'fixed',
     top: 0,
@@ -159,12 +137,6 @@ export default function Groups() {
     padding: '28px',
   };
 
-  const handleGenerateGroupCode = () => {
-    const prefix = groupName.trim() ? groupName.trim().replace(/[^a-zA-Z0-9]/g, '').substring(0, 5).toUpperCase() : 'GP';
-    const randPart = Math.random().toString(36).substring(2, 8).toUpperCase();
-    setGroupCode(`${prefix}-${randPart}`);
-  };
-
   if (loading) {
     return (
       <AppLayout title="Groups">
@@ -191,10 +163,6 @@ export default function Groups() {
               onClick={() => {
                 setModalError('');
                 setShowCreateModal(true);
-                if (!groupCode) {
-                  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
-                  setGroupCode(`GP-${rand}`);
-                }
               }}
               className="btn btn--primary"
             >
@@ -225,10 +193,6 @@ export default function Groups() {
                 onClick={() => {
                   setModalError('');
                   setShowCreateModal(true);
-                  if (!groupCode) {
-                    const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
-                    setGroupCode(`GP-${rand}`);
-                  }
                 }}
                 className="btn btn--primary"
               >
@@ -269,28 +233,19 @@ export default function Groups() {
               </div>
 
               <div className="form-group mb-16">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label className="form-label" htmlFor="groupCode" style={{ marginBottom: 0 }}>Unique Group Code (Join ID) *</label>
-                  <button
-                    type="button"
-                    onClick={handleGenerateGroupCode}
-                    className="btn btn--secondary btn--sm"
-                    style={{ padding: '3px 10px', fontSize: '12px' }}
-                  >
-                    🎲 Generate Code
-                  </button>
-                </div>
+                <label className="form-label" htmlFor="groupCode">Unique Group Code (Join ID) *</label>
                 <input
                   id="groupCode"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. GP-NEXUS or GP-ZSLDUG (Click 'Generate Code' or enter custom ID)"
+                  placeholder="e.g. GP-ALPHA, NEXUS-01, or AI-DSA-G1"
                   value={groupCode}
                   onChange={(e) => setGroupCode(e.target.value)}
                   disabled={submitting}
+                  required
                 />
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Share this unique Group Code with your team members so they can join your group.
+                  Enter a unique code for your team. Other members will enter this code to join your group.
                 </span>
               </div>
 
@@ -300,7 +255,7 @@ export default function Groups() {
                   id="manualWorkspaceCode"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. WS-ADSA-204 or WS-001 (Optional: you can also join from inside the group)"
+                  placeholder="e.g. WS-ADSA-204 or 23AID204 (Optional: you can also join from inside the group)"
                   value={manualWorkspaceCode}
                   onChange={(e) => setManualWorkspaceCode(e.target.value)}
                   disabled={submitting}

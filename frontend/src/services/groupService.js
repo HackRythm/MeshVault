@@ -42,6 +42,10 @@ const groupService = {
 
   async deleteGroup(groupId) {
     return api.delete(`/api/groups/${groupId}`);
+  },
+
+  async requestLeaveWorkspace(groupId, workspaceId) {
+    return api.post(`/api/workspaces/${workspaceId}/remove/group/${groupId}`);
   }
 };
 

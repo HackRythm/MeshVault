@@ -159,6 +159,18 @@ export default function GroupDetail() {
     }
   };
 
+  const handleRequestLeaveWorkspace = async () => {
+    if (!window.confirm(`Are you sure you want to request to leave workspace "${group.workspace_name}" (${group.workspace_code || `WS-${group.workspace_id}`})?\n\nThis will send a leave permission request to the course instructor.`)) return;
+
+    try {
+      await groupService.requestLeaveWorkspace(group.id, group.workspace_id);
+      alert('Leave workspace request submitted! Awaiting instructor approval.');
+      await fetchGroupDetail();
+    } catch (err) {
+      alert(err.message || 'Failed to submit leave request.');
+    }
+  };
+
   const copyCodeToClipboard = () => {
     if (group && group.code) {
       navigator.clipboard.writeText(group.code);
@@ -215,6 +227,7 @@ export default function GroupDetail() {
   const leaders = group.members?.filter(m => m.is_leader) || [];
   const members = group.members?.filter(m => !m.is_leader) || [];
   const isUserLeader = group.is_leader;
+  const isRemovalPending = group.workspace_connection_status === 'REMOVAL_PENDING';
 
   return (
     <AppLayout title={`Groups / ${group.name}`}>
@@ -228,9 +241,15 @@ export default function GroupDetail() {
               </span>
             )}
             {group.workspace_id ? (
-              <span className="badge badge--success" style={{ fontSize: '12px' }}>
-                ✓ {group.workspace_code || `WS-${group.workspace_id}`}: {group.workspace_name}
-              </span>
+              isRemovalPending ? (
+                <span className="badge badge--warning" style={{ fontSize: '12px' }}>
+                  ⏳ Leave Pending: {group.workspace_code || `WS-${group.workspace_id}`}
+                </span>
+              ) : (
+                <span className="badge badge--success" style={{ fontSize: '12px' }}>
+                  ✓ {group.workspace_code || `WS-${group.workspace_id}`}: {group.workspace_name}
+                </span>
+              )
             ) : (
               <span className="badge badge--muted" style={{ fontSize: '12px' }}>
                 ⚠️ No Workspace Linked
@@ -247,18 +266,34 @@ export default function GroupDetail() {
         <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <Link to="/groups" className="btn btn--secondary">⬅️ Back</Link>
           
-          {/* Join Workspace / Switch Workspace button inside the group */}
+          {/* Join Workspace / Leave Workspace button inside the group */}
           {user.role === 'STUDENT' && isUserLeader && (
-            <button
-              onClick={() => {
-                setJoinWsError('');
-                setJoinWsSuccess('');
-                setShowJoinWsModal(true);
-              }}
-              className={group.workspace_id ? "btn btn--secondary" : "btn btn--primary"}
-            >
-              {group.workspace_id ? "🔄 Change Workspace" : "🔗 Join Workspace"}
-            </button>
+            <>
+              {!group.workspace_id ? (
+                <button
+                  onClick={() => {
+                    setJoinWsError('');
+                    setJoinWsSuccess('');
+                    setShowJoinWsModal(true);
+                  }}
+                  className="btn btn--primary"
+                >
+                  🔗 Join Workspace
+                </button>
+              ) : isRemovalPending ? (
+                <span className="badge badge--warning" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                  ⏳ Leave Request Pending Staff Approval
+                </span>
+              ) : (
+                <button
+                  onClick={handleRequestLeaveWorkspace}
+                  className="btn btn--secondary"
+                  style={{ color: 'var(--text-danger)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                >
+                  🚪 Leave Workspace
+                </button>
+              )}
+            </>
           )}
 
           {user.role === 'STUDENT' && (
@@ -374,6 +409,20 @@ export default function GroupDetail() {
                 </button>
               )}
             </div>
+          ) : isRemovalPending ? (
+            <div className="card mb-20 p-16" style={{ border: '1px solid rgba(245, 158, 11, 0.4)', background: 'rgba(245, 158, 11, 0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 'var(--radius)', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '2px', color: 'var(--clr-warning)' }}>
+                  ⏳ Leave Workspace Request Submitted (Awaiting Staff Permission)
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Your request to unlink <strong>{group.name}</strong> from <strong>{group.workspace_name}</strong> is currently pending review and permission from the course instructor.
+                </div>
+              </div>
+              <span className="badge badge--warning" style={{ padding: '6px 12px' }}>
+                Pending Review
+              </span>
+            </div>
           ) : (
             <div className="card mb-20 p-16" style={{ border: '1px solid rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 'var(--radius)', flexWrap: 'wrap', gap: '12px' }}>
               <div>
@@ -386,15 +435,11 @@ export default function GroupDetail() {
               </div>
               {user.role === 'STUDENT' && isUserLeader && (
                 <button
-                  onClick={() => {
-                    setJoinWsError('');
-                    setJoinWsSuccess('');
-                    setShowJoinWsModal(true);
-                  }}
+                  onClick={handleRequestLeaveWorkspace}
                   className="btn btn--secondary btn--sm"
-                  style={{ whiteSpace: 'nowrap' }}
+                  style={{ whiteSpace: 'nowrap', color: 'var(--text-danger)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
                 >
-                  🔄 Change Workspace
+                  🚪 Leave Workspace
                 </button>
               )}
             </div>

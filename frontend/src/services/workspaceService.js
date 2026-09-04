@@ -41,12 +41,16 @@ const workspaceService = {
     return api.get(`/api/workspaces/${workspaceId}/join-requests`);
   },
 
-  async approveJoinRequest(workspaceId, requestId) {
-    return api.post(`/api/workspaces/${workspaceId}/join-requests/${requestId}/approve`);
+  async deleteWorkspace(id) {
+    return api.delete(`/api/workspaces/${id}`);
   },
 
-  async rejectJoinRequest(workspaceId, requestId, reason) {
-    return api.post(`/api/workspaces/${workspaceId}/join-requests/${requestId}/reject`, { reason });
+  async approveGroupRemoval(workspaceId, groupId) {
+    return api.post(`/api/workspaces/${workspaceId}/remove/group/${groupId}/approve`);
+  },
+
+  async rejectGroupRemoval(workspaceId, groupId) {
+    return api.post(`/api/workspaces/${workspaceId}/remove/group/${groupId}/reject`);
   },
 };
 

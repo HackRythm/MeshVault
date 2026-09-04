@@ -441,6 +441,26 @@ export default function Workspace() {
     );
   }
 
+  const handleDeleteWorkspace = async () => {
+    if (!selectedWs) return;
+    if (!window.confirm(`⚠️ WARNING: Are you sure you want to permanently delete workspace "${selectedWs.name}" (${selectedWs.course_code})?\n\nThis will remove all associated group links and workspace records. This action cannot be undone.`)) return;
+
+    try {
+      await workspaceService.deleteWorkspace(selectedWs.id);
+      alert('Workspace deleted successfully.');
+      const list = await workspaceService.getWorkspaces(user.id, user.role);
+      setWorkspaces(list);
+      if (list && list.length > 0) {
+        setSelectedWs(list[0]);
+      } else {
+        setSelectedWs(null);
+        setWsDetail(null);
+      }
+    } catch (err) {
+      alert(err.message || 'Failed to delete workspace.');
+    }
+  };
+
   return (
     <AppLayout title="Workspace">
       <div className="page-header">
@@ -469,7 +489,7 @@ export default function Workspace() {
             </>
           )}
         </div>
-        <div className="flex gap-12">
+        <div className="flex gap-12 flex-wrap">
           {user.role === 'STUDENT' && (
             <button
               onClick={() => {
@@ -510,6 +530,15 @@ export default function Workspace() {
             <Link to="/workspace/new" className="btn btn--secondary">
               ➕ New Workspace
             </Link>
+          )}
+          {selectedWs && user.role === 'STAFF' && (selectedWs.created_by === user.id || !selectedWs.created_by) && (
+            <button
+              onClick={handleDeleteWorkspace}
+              className="btn btn--danger"
+              style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: 'var(--text-danger)', color: 'var(--text-danger)' }}
+            >
+              🗑️ Delete Workspace
+            </button>
           )}
         </div>
       </div>
@@ -568,30 +597,49 @@ export default function Workspace() {
 
           {activeTab === 'overview' || user.role !== 'STAFF' ? (
             <>
-              {/* Pending Join Requests (Staff Only) */}
+              {/* Pending Join / Leave Requests (Staff Only) */}
               {user.role === 'STAFF' && wsDetail?.pending_requests?.length > 0 && (
                 <div className="detail-section mb-24" style={{ border: '1px solid rgba(245, 158, 11, 0.3)', borderRadius: 'var(--radius)', padding: '20px', background: 'rgba(245, 158, 11, 0.03)' }}>
                   <h2 className="detail-section__title" style={{ color: 'var(--clr-warning)', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: 'none', paddingBottom: 0 }}>
-                    ⏳ Pending Student Join Requests ({wsDetail.pending_requests.length})
+                    ⏳ Pending Requests ({wsDetail.pending_requests.length})
                   </h2>
                   <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                    The following students have submitted requests to join this workspace.
+                    Review membership join requests and group leave permissions for this workspace.
                   </p>
                   <div className="card p-0" style={{ overflow: 'hidden' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                       <thead>
                         <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Student Name</th>
-                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Email</th>
+                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Type</th>
+                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Student / Group</th>
+                          <th style={{ padding: '12px 16px', textAlign: 'left' }}>Details</th>
                           <th style={{ padding: '12px 16px', textAlign: 'left' }}>Requested At</th>
                           <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {wsDetail.pending_requests.map((req) => (
-                          <tr key={req.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                            <td style={{ padding: '12px 16px', fontWeight: '500' }}>{req.user_name}</td>
-                            <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{req.user_email}</td>
+                          <tr key={`${req.type || 'join'}-${req.id}`} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '12px 16px' }}>
+                              {req.type === 'GROUP_LEAVE' ? (
+                                <span className="badge badge--warning" style={{ fontSize: '11px' }}>🚪 Leave Workspace</span>
+                              ) : (
+                                <span className="badge badge--primary" style={{ fontSize: '11px' }}>🔗 Join Request</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '12px 16px', fontWeight: '500' }}>
+                              {req.type === 'GROUP_LEAVE' ? (
+                                <div>
+                                  <strong>{req.group_name}</strong>
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Code: {req.group_code} • Leader: {req.user_name}</div>
+                                </div>
+                              ) : (
+                                req.user_name
+                              )}
+                            </td>
+                            <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
+                              {req.type === 'GROUP_LEAVE' ? 'Request to leave workspace' : req.user_email}
+                            </td>
                             <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>
                               {req.requested_at ? new Date(req.requested_at).toLocaleDateString() : 'Just now'}
                             </td>
@@ -599,7 +647,11 @@ export default function Workspace() {
                               <button
                                 onClick={async () => {
                                   try {
-                                    await workspaceService.approveJoinRequest(selectedWs.id, req.id);
+                                    if (req.type === 'GROUP_LEAVE') {
+                                      await workspaceService.approveGroupRemoval(selectedWs.id, req.group_id);
+                                    } else {
+                                      await workspaceService.approveJoinRequest(selectedWs.id, req.id);
+                                    }
                                     const detail = await workspaceService.getWorkspace(selectedWs.id, user.id, user.role);
                                     setWsDetail(detail);
                                   } catch (e) {
@@ -614,7 +666,11 @@ export default function Workspace() {
                               <button
                                 onClick={async () => {
                                   try {
-                                    await workspaceService.rejectJoinRequest(selectedWs.id, req.id);
+                                    if (req.type === 'GROUP_LEAVE') {
+                                      await workspaceService.rejectGroupRemoval(selectedWs.id, req.group_id);
+                                    } else {
+                                      await workspaceService.rejectJoinRequest(selectedWs.id, req.id);
+                                    }
                                     const detail = await workspaceService.getWorkspace(selectedWs.id, user.id, user.role);
                                     setWsDetail(detail);
                                   } catch (e) {

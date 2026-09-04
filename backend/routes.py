@@ -268,6 +268,39 @@ def create_workspace(
     }
 
 
+@router.delete("/workspaces/{workspace_id}", status_code=200)
+def delete_workspace(
+    workspace_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete an academic workspace (owner/staff only)."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Only staff can delete workspaces.")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden: You can only delete workspaces you created.")
+
+    # Unlink any groups attached to this workspace
+    attached_groups = db.query(Group).filter(Group.workspace_id == workspace_id).all()
+    for g in attached_groups:
+        g.workspace_id = None
+        g.group_number = None
+
+    # Delete workspace associations
+    db.query(WorkspaceAccess).filter(WorkspaceAccess.workspace_id == workspace_id).delete()
+    db.query(WorkspaceGroup).filter(WorkspaceGroup.workspace_id == workspace_id).delete()
+    db.query(WorkspaceProject).filter(WorkspaceProject.workspace_id == workspace_id).delete()
+    
+    db.delete(ws)
+    db.commit()
+
+    return {"success": True, "message": f"Workspace '{ws.name}' ({ws.workspace_id}) deleted successfully."}
+
+
 @router.get("/workspaces/{workspace_id}")
 def get_workspace(
     workspace_id: int,
@@ -327,7 +360,7 @@ def get_workspace(
         grp = db.query(Group).filter(Group.id == p.group_id).first()
         project_list.append(_project_dict(p, grp))
 
-    # Pending join requests for staff
+    # Pending join and leave requests for staff
     pending_requests = []
     if current_user.role == "STAFF":
         pending = db.query(WorkspaceAccess).filter(
@@ -338,10 +371,30 @@ def get_workspace(
             user = db.query(User).filter(User.id == pr.user_id).first()
             pending_requests.append({
                 "id": pr.id,
+                "type": "USER_JOIN",
                 "user_id": pr.user_id,
                 "user_name": user.name if user else "Unknown",
                 "user_email": user.email if user else "",
                 "requested_at": str(pr.requested_at) if pr.requested_at else None,
+            })
+
+        # Pending group leave requests
+        pending_leave_groups = db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.workspace_id == workspace_id,
+            WorkspaceGroup.status == "REMOVAL_PENDING"
+        ).all()
+        for wg in pending_leave_groups:
+            grp = db.query(Group).filter(Group.id == wg.group_id).first()
+            req_user = db.query(User).filter(User.id == wg.requested_by).first()
+            pending_requests.append({
+                "id": wg.id,
+                "type": "GROUP_LEAVE",
+                "group_id": wg.group_id,
+                "group_name": grp.name if grp else "Unknown Group",
+                "group_code": grp.code if grp else "",
+                "user_name": req_user.name if req_user else "Group Leader",
+                "user_email": req_user.email if req_user else "",
+                "requested_at": str(wg.requested_at) if wg.requested_at else None,
             })
 
     return {
@@ -812,7 +865,7 @@ def approve_remove_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Faculty host approves group removal request."""
+    """Faculty host approves group leave/removal request."""
     if current_user.role != "STAFF":
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -828,6 +881,12 @@ def approve_remove_group(
         raise HTTPException(404, detail="Request not found.")
 
     wg.status = "REMOVED"
+
+    # Unlink the group from this workspace
+    grp = db.query(Group).filter(Group.id == group_id).first()
+    if grp and grp.workspace_id == workspace_id:
+        grp.workspace_id = None
+        grp.group_number = None
     
     wps = db.query(WorkspaceProject).join(Project).filter(
         WorkspaceProject.workspace_id == workspace_id,
@@ -837,7 +896,42 @@ def approve_remove_group(
         wp.status = "REMOVED"
 
     db.commit()
-    return {"success": True, "message": "Group removed from workspace."}
+    return {"success": True, "message": f"Approved leave request for group '{grp.name if grp else group_id}'."}
+
+
+@router.post("/workspaces/{workspace_id}/remove/group/{group_id}/reject", status_code=200)
+def reject_remove_group(
+    workspace_id: int,
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Faculty host rejects group leave request."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws or ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    wg = db.query(WorkspaceGroup).filter(
+        WorkspaceGroup.workspace_id == workspace_id,
+        WorkspaceGroup.group_id == group_id
+    ).first()
+    if not wg:
+        raise HTTPException(404, detail="Request not found.")
+
+    wg.status = "APPROVED"
+    
+    wps = db.query(WorkspaceProject).join(Project).filter(
+        WorkspaceProject.workspace_id == workspace_id,
+        Project.group_id == group_id
+    ).all()
+    for wp in wps:
+        wp.status = "APPROVED"
+
+    db.commit()
+    return {"success": True, "message": "Rejected leave request. Group remains in workspace."}
 
 
 @router.post("/workspaces/{workspace_id}/remove/project/{project_id}/approve", status_code=200)
@@ -1425,6 +1519,10 @@ def get_group(
     project_list = [_project_dict(p) for p in projects]
 
     ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first() if grp.workspace_id else None
+    wg = db.query(WorkspaceGroup).filter(
+        WorkspaceGroup.workspace_id == grp.workspace_id,
+        WorkspaceGroup.group_id == grp.id
+    ).first() if grp.workspace_id else None
 
     return {
         "id": grp.id,
@@ -1433,6 +1531,7 @@ def get_group(
         "workspace_name": ws.name if ws else None,
         "course_code": ws.course_code if ws else None,
         "course_name": ws.course_name if ws else None,
+        "workspace_connection_status": wg.status if wg else ("APPROVED" if grp.workspace_id else None),
         "group_number": grp.group_number,
         "name": grp.name,
         "code": grp.code,
