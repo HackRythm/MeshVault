@@ -345,6 +345,7 @@ def get_workspace(
                 })
         group_list.append({
             "id": g.id,
+            "workspace_id": g.workspace_id,
             "group_number": g.group_number,
             "name": g.name,
             "description": g.description,
@@ -1643,11 +1644,30 @@ def create_project(
     db.add(act)
     db.commit()
 
+    # If group is connected to a workspace, auto-link project
+    ws = None
+    if grp.workspace_id:
+        ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first()
+        existing_wp = db.query(WorkspaceProject).filter(
+            WorkspaceProject.workspace_id == grp.workspace_id,
+            WorkspaceProject.project_id == project.id
+        ).first()
+        if not existing_wp:
+            wp = WorkspaceProject(
+                workspace_id=grp.workspace_id,
+                project_id=project.id,
+                requested_by=current_user.id,
+                status="APPROVED"
+            )
+            db.add(wp)
+            db.commit()
+
     # Update search index
     request.app.state.search_index.add_project(project)
 
     d = _project_dict(project, grp)
-    d["workspace_name"] = ""
+    d["workspace_id"] = grp.workspace_id
+    d["workspace_name"] = ws.name if ws else ""
 
     # Update Progress BST
     request.app.state.progress_bst.insert(dict(d))
@@ -1678,7 +1698,7 @@ def get_project(
             GroupMembership.user_id == current_user.id,
             GroupMembership.group_id == proj.group_id
         ).first()
-        if mems or any(has_workspace_access(wid, current_user, db) for wid in workspace_ids):
+        if mems:
             has_access = True
     elif current_user.role == "STAFF":
         if any(has_workspace_access(wid, current_user, db) for wid in workspace_ids):
