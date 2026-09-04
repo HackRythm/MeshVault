@@ -1269,9 +1269,14 @@ def group_join_workspace(
     if not grp:
         raise HTTPException(404, "Group not found")
 
-    ws = db.query(Workspace).filter(Workspace.workspace_id == body.workspace_code.strip()).first()
+    ws_query = body.workspace_code.strip()
+    from sqlalchemy import func
+    ws = db.query(Workspace).filter(
+        (func.lower(Workspace.workspace_id) == ws_query.lower()) |
+        (func.lower(Workspace.join_code) == ws_query.lower())
+    ).first()
     if not ws:
-        raise HTTPException(404, detail=f"No workspace found with ID '{body.workspace_code.strip()}'.")
+        raise HTTPException(404, detail=f"No workspace found with code '{ws_query}'. Please verify the Workspace ID with your instructor.")
 
     # Check if already in this workspace
     if grp.workspace_id == ws.id:
@@ -1290,6 +1295,46 @@ def group_join_workspace(
                 pass
     grp.group_number = f"G{max_num + 1}"
     grp.workspace_id = ws.id
+
+    # Create or update WorkspaceGroup record
+    wg = db.query(WorkspaceGroup).filter(
+        WorkspaceGroup.workspace_id == ws.id,
+        WorkspaceGroup.group_id == grp.id
+    ).first()
+    if not wg:
+        wg = WorkspaceGroup(
+            workspace_id=ws.id,
+            group_id=grp.id,
+            requested_by=current_user.id,
+            status="APPROVED",
+            requested_at=datetime.utcnow(),
+            approved_at=datetime.utcnow()
+        )
+        db.add(wg)
+    else:
+        wg.status = "APPROVED"
+        wg.approved_at = datetime.utcnow()
+
+    # Link existing group projects to the workspace
+    projects = db.query(Project).filter(Project.group_id == grp.id).all()
+    for p in projects:
+        wp = db.query(WorkspaceProject).filter(
+            WorkspaceProject.workspace_id == ws.id,
+            WorkspaceProject.project_id == p.id
+        ).first()
+        if not wp:
+            wp = WorkspaceProject(
+                workspace_id=ws.id,
+                project_id=p.id,
+                requested_by=current_user.id,
+                status="APPROVED",
+                requested_at=datetime.utcnow(),
+                approved_at=datetime.utcnow()
+            )
+            db.add(wp)
+        else:
+            wp.status = "APPROVED"
+            wp.approved_at = datetime.utcnow()
 
     # Auto-ensure workspace access for all group members
     for gm in grp.memberships:

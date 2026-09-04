@@ -159,6 +159,12 @@ export default function Groups() {
     padding: '28px',
   };
 
+  const handleGenerateGroupCode = () => {
+    const prefix = groupName.trim() ? groupName.trim().replace(/[^a-zA-Z0-9]/g, '').substring(0, 5).toUpperCase() : 'GP';
+    const randPart = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setGroupCode(`${prefix}-${randPart}`);
+  };
+
   if (loading) {
     return (
       <AppLayout title="Groups">
@@ -178,13 +184,20 @@ export default function Groups() {
         </div>
         {user.role === 'STUDENT' && (
           <div className="page-header__actions" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <button onClick={() => { setJoinWsError(''); setJoinWsSuccess(''); setShowJoinWsModal(true); }} className="btn btn--secondary" style={{ borderColor: 'var(--clr-primary)', color: 'var(--clr-primary)' }}>
-              🔗 Join Workspace
-            </button>
             <button onClick={() => { setModalError(''); setShowJoinGroupModal(true); }} className="btn btn--secondary">
               🚪 Join Group
             </button>
-            <button onClick={() => { setModalError(''); setShowCreateModal(true); }} className="btn btn--primary">
+            <button
+              onClick={() => {
+                setModalError('');
+                setShowCreateModal(true);
+                if (!groupCode) {
+                  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+                  setGroupCode(`GP-${rand}`);
+                }
+              }}
+              className="btn btn--primary"
+            >
               ➕ Create Group
             </button>
           </div>
@@ -208,59 +221,24 @@ export default function Groups() {
           />
           {user.role === 'STUDENT' && (
             <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: '-12px', marginBottom: '32px' }}>
-              <button onClick={() => { setModalError(''); setShowCreateModal(true); }} className="btn btn--primary">
+              <button
+                onClick={() => {
+                  setModalError('');
+                  setShowCreateModal(true);
+                  if (!groupCode) {
+                    const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+                    setGroupCode(`GP-${rand}`);
+                  }
+                }}
+                className="btn btn--primary"
+              >
                 ➕ Create Group
               </button>
               <button onClick={() => { setModalError(''); setShowJoinGroupModal(true); }} className="btn btn--secondary">
                 🚪 Join Group
               </button>
-              <button onClick={() => { setJoinWsError(''); setJoinWsSuccess(''); setShowJoinWsModal(true); }} className="btn btn--secondary">
-                🔗 Join Workspace
-              </button>
             </div>
           )}
-        </div>
-      )}
-
-      {/* ─── Join Workspace Modal ─── */}
-      {showJoinWsModal && (
-        <div style={modalOverlayStyle} onClick={() => setShowJoinWsModal(false)}>
-          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-16">
-              <h3 className="modal__title" style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>🔗 Join Academic Workspace</h3>
-              <button onClick={() => setShowJoinWsModal(false)} className="btn btn--ghost btn--sm">✕</button>
-            </div>
-
-            {joinWsError && <div className="login-card__error mb-16">{joinWsError}</div>}
-            {joinWsSuccess && <div className="badge badge--success mb-16 p-12" style={{ display: 'block', textAlign: 'center' }}>{joinWsSuccess}</div>}
-
-            <form onSubmit={handleJoinWorkspace}>
-              <div className="form-group mb-20">
-                <label className="form-label">Workspace ID *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={joinWsCode}
-                  onChange={(e) => setJoinWsCode(e.target.value)}
-                  placeholder="e.g. WS-001 or WS-DSA-2025"
-                  required
-                  autoFocus
-                />
-                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Enter the Workspace ID provided by your instructor to request membership.
-                </span>
-              </div>
-
-              <div className="flex gap-12" style={{ justifyContent: 'flex-end' }}>
-                <button type="button" onClick={() => setShowJoinWsModal(false)} className="btn btn--secondary">
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn--primary" disabled={joinWsSubmitting}>
-                  {joinWsSubmitting ? 'Submitting Request...' : 'Submit Join Request'}
-                </button>
-              </div>
-            </form>
-          </div>
         </div>
       )}
 
@@ -276,29 +254,12 @@ export default function Groups() {
             
             <form onSubmit={handleCreateGroup}>
               <div className="form-group mb-16">
-                <label className="form-label" htmlFor="manualWorkspaceCode">Academic Workspace ID (Optional)</label>
-                <input
-                  id="manualWorkspaceCode"
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. WS-001 or WS-ADSA-204 (Optional: leave blank to join later)"
-                  value={manualWorkspaceCode}
-                  onChange={(e) => setManualWorkspaceCode(e.target.value)}
-                  disabled={submitting}
-                />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Enter the Workspace ID to link your group directly to a course environment, or leave blank to join later.
-                </span>
-              </div>
-
-
-              <div className="form-group mb-16">
                 <label className="form-label" htmlFor="groupName">Group Name *</label>
                 <input
                   id="groupName"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Team Alpha"
+                  placeholder="e.g. Nexus Coders or Team Alpha"
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
                   disabled={submitting}
@@ -308,18 +269,44 @@ export default function Groups() {
               </div>
 
               <div className="form-group mb-16">
-                <label className="form-label" htmlFor="groupCode">Unique Group Join Code (Optional)</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label className="form-label" htmlFor="groupCode" style={{ marginBottom: 0 }}>Unique Group Code (Join ID) *</label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateGroupCode}
+                    className="btn btn--secondary btn--sm"
+                    style={{ padding: '3px 10px', fontSize: '12px' }}
+                  >
+                    🎲 Generate Code
+                  </button>
+                </div>
                 <input
                   id="groupCode"
                   type="text"
                   className="form-input"
-                  placeholder="e.g. ALPHA-X7K92P (Optional: auto-assigned if blank)"
+                  placeholder="e.g. GP-NEXUS or GP-ZSLDUG (Click 'Generate Code' or enter custom ID)"
                   value={groupCode}
                   onChange={(e) => setGroupCode(e.target.value)}
                   disabled={submitting}
                 />
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Other students will enter this code to join your group.
+                  Share this unique Group Code with your team members so they can join your group.
+                </span>
+              </div>
+
+              <div className="form-group mb-16">
+                <label className="form-label" htmlFor="manualWorkspaceCode">Academic Workspace Code (Optional)</label>
+                <input
+                  id="manualWorkspaceCode"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. WS-ADSA-204 or WS-001 (Optional: you can also join from inside the group)"
+                  value={manualWorkspaceCode}
+                  onChange={(e) => setManualWorkspaceCode(e.target.value)}
+                  disabled={submitting}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Link directly to a course workspace now, or join anytime from inside your group page.
                 </span>
               </div>
 
@@ -339,7 +326,7 @@ export default function Groups() {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                 <button type="button" onClick={() => setShowCreateModal(false)} className="btn btn--secondary" disabled={submitting}>Cancel</button>
                 <button type="submit" className="btn btn--primary" disabled={submitting}>
-                  {submitting ? 'Creating...' : 'Create Group'}
+                  {submitting ? 'Creating...' : '✓ Create Group'}
                 </button>
               </div>
             </form>

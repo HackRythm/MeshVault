@@ -65,12 +65,18 @@ export default function CreateWorkspace() {
     );
   }
 
+  const handleGenerateWorkspaceCode = () => {
+    const prefix = courseCode.trim() ? courseCode.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : 'WS';
+    const randPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+    setWorkspaceId(`WS-${prefix}-${randPart}`);
+  };
+
   return (
     <AppLayout title="New Workspace">
       <div className="page-header">
         <div className="page-header__left">
           <h1 className="page-header__title">Create Academic Workspace</h1>
-          <p className="page-header__subtitle">Establish a new course lab environment.</p>
+          <p className="page-header__subtitle">Establish a new course lab environment with a custom or auto-generated unique Workspace Code.</p>
         </div>
         <Link to="/workspace" className="btn btn--secondary">Cancel</Link>
       </div>
@@ -80,28 +86,40 @@ export default function CreateWorkspace() {
       <div className="card" style={{ maxWidth: '720px' }}>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           
-          <div className="grid grid--2" style={{ gap: '20px' }}>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Workspace ID</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                value={workspaceId} 
-                onChange={(e) => setWorkspaceId(e.target.value)} 
-                placeholder="e.g. WS-001 or WS-DSA-2025 (Optional: auto-assigned if blank)" 
-              />
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="form-label" style={{ marginBottom: 0 }}>Unique Workspace Code *</label>
+              <button
+                type="button"
+                onClick={handleGenerateWorkspaceCode}
+                className="btn btn--secondary btn--sm"
+                style={{ padding: '3px 10px', fontSize: '12px' }}
+              >
+                🎲 Generate Code
+              </button>
             </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label">Workspace Name *</label>
-              <input 
-                type="text" 
-                className="form-input" 
-                value={name} 
-                onChange={(e) => setName(e.target.value)} 
-                required 
-                placeholder="e.g. DSA Lecture Hall Workspace" 
-              />
-            </div>
+            <input 
+              type="text" 
+              className="form-input" 
+              value={workspaceId} 
+              onChange={(e) => setWorkspaceId(e.target.value)} 
+              placeholder="e.g. WS-ADSA-204 or WS-001 (Click 'Generate Code' or enter custom ID)" 
+            />
+            <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+              Students and project groups will use this unique code to join your workspace.
+            </span>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Workspace Name *</label>
+            <input 
+              type="text" 
+              className="form-input" 
+              value={name} 
+              onChange={(e) => setName(e.target.value)} 
+              required 
+              placeholder="e.g. DSA Lecture Hall Workspace" 
+            />
           </div>
 
 

@@ -247,17 +247,17 @@ export default function GroupDetail() {
         <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <Link to="/groups" className="btn btn--secondary">⬅️ Back</Link>
           
-          {/* ONLY show Join Workspace button if group is NOT yet in a workspace */}
-          {!group.workspace_id && user.role === 'STUDENT' && isUserLeader && (
+          {/* Join Workspace / Switch Workspace button inside the group */}
+          {user.role === 'STUDENT' && isUserLeader && (
             <button
               onClick={() => {
                 setJoinWsError('');
                 setJoinWsSuccess('');
                 setShowJoinWsModal(true);
               }}
-              className="btn btn--primary"
+              className={group.workspace_id ? "btn btn--secondary" : "btn btn--primary"}
             >
-              🔗 Join Workspace
+              {group.workspace_id ? "🔄 Change Workspace" : "🔗 Join Workspace"}
             </button>
           )}
 
@@ -349,15 +349,15 @@ export default function GroupDetail() {
 
         {/* Projects column */}
         <div className="detail-section">
-          {/* Workspace Status Banner if not connected */}
-          {!group.workspace_id && (
-            <div className="card mb-20 p-16" style={{ border: '1px solid rgba(99, 102, 241, 0.3)', background: 'rgba(99, 102, 241, 0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 'var(--radius)' }}>
+          {/* Workspace Connection Banner */}
+          {!group.workspace_id ? (
+            <div className="card mb-20 p-16" style={{ border: '1px solid rgba(99, 102, 241, 0.4)', background: 'rgba(99, 102, 241, 0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 'var(--radius)', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '2px', color: 'var(--text-primary)' }}>
-                  🔗 Link this Group to an Academic Workspace
+                <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '4px', color: 'var(--text-primary)' }}>
+                  🏫 Connect Group to Academic Workspace
                 </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  This group is currently standalone. Join an Academic Workspace using your course Workspace ID (e.g. WS-001).
+                  This group is standalone. As group leader, use the instructor's <strong>Workspace Code</strong> (e.g. WS-ADSA-204) to join a course workspace.
                 </div>
               </div>
               {user.role === 'STUDENT' && isUserLeader && (
@@ -368,9 +368,33 @@ export default function GroupDetail() {
                     setShowJoinWsModal(true);
                   }}
                   className="btn btn--primary btn--sm"
-                  style={{ whiteSpace: 'nowrap', marginLeft: '16px' }}
+                  style={{ whiteSpace: 'nowrap' }}
                 >
                   🔗 Join Workspace
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="card mb-20 p-16" style={{ border: '1px solid rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 'var(--radius)', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '2px', color: 'var(--text-primary)' }}>
+                  ✓ Connected to Workspace: <span style={{ color: 'var(--clr-primary)' }}>{group.workspace_code || `WS-${group.workspace_id}`}</span> ({group.workspace_name})
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Course: {group.course_code || 'N/A'} {group.course_name ? `— ${group.course_name}` : ''} | Group Number: <strong>{group.group_number || 'N/A'}</strong>
+                </div>
+              </div>
+              {user.role === 'STUDENT' && isUserLeader && (
+                <button
+                  onClick={() => {
+                    setJoinWsError('');
+                    setJoinWsSuccess('');
+                    setShowJoinWsModal(true);
+                  }}
+                  className="btn btn--secondary btn--sm"
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  🔄 Change Workspace
                 </button>
               )}
             </div>
@@ -523,7 +547,7 @@ export default function GroupDetail() {
           <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-16">
               <h3 className="modal__title" style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>
-                🔗 Connect Group to Workspace
+                🔗 Connect Group to Academic Workspace
               </h3>
               <button onClick={() => setShowJoinWsModal(false)} className="btn btn--ghost btn--sm">✕</button>
             </div>
@@ -533,18 +557,18 @@ export default function GroupDetail() {
 
             <form onSubmit={handleJoinWorkspace}>
               <div className="form-group mb-20">
-                <label className="form-label">Workspace ID *</label>
+                <label className="form-label">Academic Workspace Code (Unique ID) *</label>
                 <input
                   type="text"
                   className="form-input"
                   value={joinWsCode}
                   onChange={(e) => setJoinWsCode(e.target.value)}
-                  placeholder="e.g. WS-001 or WS-ADSA-204"
+                  placeholder="e.g. WS-ADSA-204 or WS-001"
                   required
                   autoFocus
                 />
                 <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Enter the course Workspace ID to link <strong>{group.name}</strong> to that academic workspace.
+                  Enter the unique Workspace Code generated by your instructor to link <strong>{group.name}</strong> and all its projects to the course environment.
                 </span>
               </div>
 
@@ -553,7 +577,7 @@ export default function GroupDetail() {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn--primary" disabled={joinWsSubmitting}>
-                  {joinWsSubmitting ? 'Linking Group...' : 'Link to Workspace'}
+                  {joinWsSubmitting ? 'Connecting...' : '✓ Link Group to Workspace'}
                 </button>
               </div>
             </form>
