@@ -50,6 +50,12 @@ const projectService = {
     return api.get(`/api/review-queue?${p}`);
   },
 
+  async getReviewQueueCount(workspaceId) {
+    const p = new URLSearchParams();
+    if (workspaceId) p.append('workspace_id', workspaceId);
+    return api.get(`/api/review-queue/count?${p}`);
+  },
+
   async getReviewQueueNext(workspaceId) {
     const p = new URLSearchParams();
     if (workspaceId) p.append('workspace_id', workspaceId);

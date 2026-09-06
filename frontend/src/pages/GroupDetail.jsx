@@ -19,6 +19,7 @@ export default function GroupDetail() {
   // Modals state
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [showJoinWsModal, setShowJoinWsModal] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   // Workspace Join state
   const [joinWsCode, setJoinWsCode] = useState('');
@@ -26,22 +27,35 @@ export default function GroupDetail() {
   const [joinWsSuccess, setJoinWsSuccess] = useState('');
   const [joinWsSubmitting, setJoinWsSubmitting] = useState(false);
 
-  // Form states
+  // Add Project Form states
   const [projId, setProjId] = useState('');
   const [projName, setProjName] = useState('');
   const [projDesc, setProjDesc] = useState('');
   const [projCourse, setProjCourse] = useState('');
   const [projPriority, setProjPriority] = useState('MEDIUM');
   const [projDeadline, setProjDeadline] = useState('');
-
   const [modalError, setModalError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Review Request Form states (student -> staff queue)
+  const [reviewProjId, setReviewProjId] = useState('');
+  const [reviewType, setReviewType] = useState('Progress Update');
+  const [reviewMsg, setReviewMsg] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewSuccess, setReviewSuccess] = useState('');
+
+  // Log filter
+  const [logFilter, setLogFilter] = useState('ALL');
 
   const fetchGroupDetail = async () => {
     try {
       setLoading(true);
       const detail = await groupService.getGroup(id);
       setGroup(detail);
+      if (detail.projects && detail.projects.length > 0 && !reviewProjId) {
+        setReviewProjId(detail.projects[0].id);
+      }
     } catch (err) {
       setError(err.message || 'Failed to fetch group details.');
     } finally {
@@ -107,6 +121,42 @@ export default function GroupDetail() {
       setModalError(err.message || 'Failed to create project.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleGroupReviewSubmit = async (e) => {
+    e.preventDefault();
+    if (!reviewProjId) {
+      setReviewError('Please select a project to review.');
+      return;
+    }
+    if (!reviewMsg.trim()) {
+      setReviewError('Please enter a message for the review request.');
+      return;
+    }
+
+    setReviewSubmitting(true);
+    setReviewError('');
+    setReviewSuccess('');
+
+    try {
+      await projectService.submitReviewRequest({
+        project_id: parseInt(reviewProjId),
+        submitted_by: user.id,
+        request_type: reviewType,
+        message: reviewMsg.trim(),
+      });
+      setReviewSuccess('Review request submitted successfully to the Staff Review Queue!');
+      setReviewMsg('');
+      await fetchGroupDetail();
+      setTimeout(() => {
+        setShowReviewModal(false);
+        setReviewSuccess('');
+      }, 1500);
+    } catch (err) {
+      setReviewError(err.message || 'Failed to submit review request.');
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -178,6 +228,32 @@ export default function GroupDetail() {
     }
   };
 
+  const getActivityIcon = (type) => {
+    switch (type) {
+      case 'REVIEW_REQUESTED': return '📋';
+      case 'REVIEW_PROCESSED': return '✅';
+      case 'GRADE_EVALUATED': return '🎓';
+      case 'PROJECT_CREATED': return '🆕';
+      case 'PROJECT_UPDATED': return '✏️';
+      case 'PROGRESS_UPDATED': return '📈';
+      case 'STATUS_CHANGED': return '🔄';
+      case 'MILESTONE_ADDED': return '🏁';
+      default: return '📜';
+    }
+  };
+
+  const getActivityBadge = (type) => {
+    switch (type) {
+      case 'REVIEW_REQUESTED': return <span className="badge badge--warning">Review Requested</span>;
+      case 'REVIEW_PROCESSED': return <span className="badge badge--success">Review Approved</span>;
+      case 'GRADE_EVALUATED': return <span className="badge badge--accent">Grade Recorded</span>;
+      case 'PROJECT_CREATED': return <span className="badge badge--info">Project Created</span>;
+      case 'PROGRESS_UPDATED': return <span className="badge badge--warning">Progress Updated</span>;
+      case 'MILESTONE_ADDED': return <span className="badge badge--muted">Milestone Added</span>;
+      default: return <span className="badge badge--neutral">{type.replace('_', ' ')}</span>;
+    }
+  };
+
   const modalOverlayStyle = {
     position: 'fixed',
     top: 0,
@@ -228,6 +304,19 @@ export default function GroupDetail() {
   const members = group.members?.filter(m => !m.is_leader) || [];
   const isUserLeader = group.is_leader;
   const isRemovalPending = group.workspace_connection_status === 'REMOVAL_PENDING';
+  const pendingReviews = group.pending_reviews || [];
+  const activities = group.activities || [];
+  const reviewRequests = group.review_requests || [];
+
+  // Filter activities and reviews
+  let filteredActivities = activities;
+  if (logFilter === 'REVIEWS') {
+    filteredActivities = activities.filter(a => a.activity_type.includes('REVIEW') || a.activity_type.includes('GRADE'));
+  } else if (logFilter === 'MILESTONES') {
+    filteredActivities = activities.filter(a => a.activity_type === 'MILESTONE_ADDED');
+  } else if (logFilter === 'PROJECTS') {
+    filteredActivities = activities.filter(a => a.activity_type.includes('PROJECT') || a.activity_type.includes('PROGRESS'));
+  }
 
   return (
     <AppLayout title={`Groups / ${group.name}`}>
@@ -266,6 +355,21 @@ export default function GroupDetail() {
         <div className="page-header__actions" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <Link to="/groups" className="btn btn--secondary">⬅️ Back</Link>
           
+          {/* Student Review Request Button */}
+          {user.role === 'STUDENT' && group.projects && group.projects.length > 0 && (
+            <button
+              onClick={() => {
+                setReviewError('');
+                setReviewSuccess('');
+                setShowReviewModal(true);
+              }}
+              className="btn btn--primary"
+              style={{ background: 'var(--accent-gradient)' }}
+            >
+              🚀 Request Review
+            </button>
+          )}
+
           {/* Join Workspace / Leave Workspace button inside the group */}
           {user.role === 'STUDENT' && isUserLeader && (
             <>
@@ -308,6 +412,41 @@ export default function GroupDetail() {
         </div>
       </div>
 
+      {/* Staff Review Alert Banner */}
+      {user.role === 'STAFF' && pendingReviews.length > 0 && (
+        <div
+          className="card mb-24 p-16"
+          style={{
+            border: '1px solid rgba(255, 107, 107, 0.4)',
+            background: 'rgba(255, 107, 107, 0.08)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderRadius: 'var(--radius)',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>🔔</span>
+            <div>
+              <div style={{ fontWeight: '700', fontSize: '14.5px', color: 'var(--clr-error)' }}>
+                {pendingReviews.length} Pending Review Request{pendingReviews.length === 1 ? '' : 's'} from this Group!
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                Latest: <strong>{pendingReviews[0].request_type}</strong> for {pendingReviews[0].project_name} ({pendingReviews[0].project_id}) — Submitted by {pendingReviews[0].submitted_by}
+              </div>
+            </div>
+          </div>
+          <Link
+            to="/review-queue"
+            className="btn btn--primary btn--sm"
+            style={{ background: 'var(--clr-error)', borderColor: 'var(--clr-error)', whiteSpace: 'nowrap' }}
+          >
+            ⚡ Review in Staff Queue ➜
+          </Link>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '24px', alignItems: 'start' }}>
         {/* Members column */}
@@ -382,7 +521,7 @@ export default function GroupDetail() {
           )}
         </div>
 
-        {/* Projects column */}
+        {/* Projects and Activity Log column */}
         <div className="detail-section">
           {/* Workspace Connection Banner */}
           {!group.workspace_id ? (
@@ -445,16 +584,19 @@ export default function GroupDetail() {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          {/* Group Projects Section */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h2 className="detail-section__title" style={{ margin: 0 }}>Group Projects ({group.projects?.length || 0})</h2>
-            {user.role === 'STUDENT' && (
-              <button onClick={() => { setModalError(''); setShowProjectModal(true); }} className="btn btn--primary">
-                ➕ Add Project
-              </button>
-            )}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {user.role === 'STUDENT' && (
+                <button onClick={() => { setModalError(''); setShowProjectModal(true); }} className="btn btn--primary btn--sm">
+                  ➕ Add Project
+                </button>
+              )}
+            </div>
           </div>
           {group.projects && group.projects.length > 0 ? (
-            <div className="grid grid--2">
+            <div className="grid grid--2 mb-32">
               {group.projects.map(proj => (
                 <div key={proj.project_id} style={{ position: 'relative' }}>
                   <ProjectCard project={proj} />
@@ -481,12 +623,201 @@ export default function GroupDetail() {
               ))}
             </div>
           ) : (
-            <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <div className="card mb-32" style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
               📭 No projects registered for this group yet. Click Add Project to start.
             </div>
           )}
+
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          {/* GROUP ACTIVITY & PAST UPDATES LOG (Student & Staff Side)     */}
+          {/* ═══════════════════════════════════════════════════════════════ */}
+          <div className="card card--flat">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h3 className="card__title" style={{ fontSize: '16px', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📜</span> Group Activity & Past Updates Log
+                </h3>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                  Audit log of past project updates, review submissions, and staff approvals.
+                </p>
+              </div>
+
+              {/* Filter Tabs */}
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  className={`btn btn--sm ${logFilter === 'ALL' ? 'btn--primary' : 'btn--ghost'}`}
+                  onClick={() => setLogFilter('ALL')}
+                  style={{ fontSize: '11.5px', padding: '4px 10px' }}
+                >
+                  All ({activities.length})
+                </button>
+                <button
+                  className={`btn btn--sm ${logFilter === 'REVIEWS' ? 'btn--primary' : 'btn--ghost'}`}
+                  onClick={() => setLogFilter('REVIEWS')}
+                  style={{ fontSize: '11.5px', padding: '4px 10px' }}
+                >
+                  Reviews ({reviewRequests.length})
+                </button>
+                <button
+                  className={`btn btn--sm ${logFilter === 'MILESTONES' ? 'btn--primary' : 'btn--ghost'}`}
+                  onClick={() => setLogFilter('MILESTONES')}
+                  style={{ fontSize: '11.5px', padding: '4px 10px' }}
+                >
+                  Milestones
+                </button>
+                <button
+                  className={`btn btn--sm ${logFilter === 'PROJECTS' ? 'btn--primary' : 'btn--ghost'}`}
+                  onClick={() => setLogFilter('PROJECTS')}
+                  style={{ fontSize: '11.5px', padding: '4px 10px' }}
+                >
+                  Projects
+                </button>
+              </div>
+            </div>
+
+            {/* Pending Reviews Box if any */}
+            {reviewRequests.filter(r => r.status === 'PENDING').length > 0 && (
+              <div style={{ marginBottom: '16px', padding: '12px 16px', background: 'rgba(253, 203, 110, 0.08)', border: '1px solid rgba(253, 203, 110, 0.3)', borderRadius: 'var(--radius-sm)' }}>
+                <strong style={{ fontSize: '12.5px', color: 'var(--clr-warning)', display: 'block', marginBottom: '8px' }}>
+                  ⏳ Active Pending Review Requests ({reviewRequests.filter(r => r.status === 'PENDING').length}):
+                </strong>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {reviewRequests.filter(r => r.status === 'PENDING').map(r => (
+                    <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12.5px', background: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '4px' }}>
+                      <span><strong>{r.project_name}</strong> ({r.project_id}) — <em>{r.request_type}</em>: "{r.message}"</span>
+                      <span className="badge badge--warning">Pending Staff Queue</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Timeline List */}
+            {filteredActivities && filteredActivities.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0px' }}>
+                {filteredActivities.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '14px',
+                      padding: '14px 12px',
+                      borderBottom: idx === filteredActivities.length - 1 ? 'none' : '1px solid var(--border)',
+                      transition: 'background 0.15s ease',
+                    }}
+                  >
+                    <div style={{ fontSize: '20px', marginTop: '2px' }}>
+                      {getActivityIcon(item.activity_type)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginBottom: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: '600', fontSize: '13px', color: 'var(--text-primary)' }}>
+                            {item.user_name}
+                          </span>
+                          {item.user_role && (
+                            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', padding: '1px 6px', borderRadius: '4px' }}>
+                              {item.user_role}
+                            </span>
+                          )}
+                          {item.project_name && (
+                            <span style={{ fontSize: '12px', color: 'var(--clr-primary)' }}>
+                              • {item.project_name} ({item.project_id})
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          {getActivityBadge(item.activity_type)}
+                        </div>
+                      </div>
+                      <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                        {item.message}
+                      </p>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '6px' }}>
+                        {new Date(item.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                📭 No past updates recorded for this filter.
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Submit Review Request Modal (Student Side) */}
+      {showReviewModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowReviewModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h2 style={{ fontSize: '18px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                🚀 Submit Review Request to Staff
+              </h2>
+              <button onClick={() => setShowReviewModal(false)} className="btn btn--ghost btn--sm">✕</button>
+            </div>
+
+            {reviewError && <div className="login-card__error mb-16">{reviewError}</div>}
+            {reviewSuccess && <div className="badge badge--success mb-16 p-12" style={{ display: 'block', textAlign: 'center' }}>{reviewSuccess}</div>}
+
+            <form onSubmit={handleGroupReviewSubmit}>
+              <div className="form-group mb-16">
+                <label className="form-label">Select Group Project *</label>
+                <select
+                  className="form-control"
+                  value={reviewProjId}
+                  onChange={(e) => setReviewProjId(e.target.value)}
+                  disabled={reviewSubmitting}
+                  required
+                >
+                  {group.projects?.map(p => (
+                    <option key={p.id} value={p.id}>{p.project_id} — {p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group mb-16">
+                <label className="form-label">Review Request Type *</label>
+                <select
+                  className="form-control"
+                  value={reviewType}
+                  onChange={(e) => setReviewType(e.target.value)}
+                  disabled={reviewSubmitting}
+                >
+                  <option value="Progress Update">Progress Update</option>
+                  <option value="Milestone Review">Milestone Review</option>
+                  <option value="Code Review">Code Review</option>
+                  <option value="Final Submission">Final Submission</option>
+                </select>
+              </div>
+
+              <div className="form-group mb-24">
+                <label className="form-label">Review Notes & Message *</label>
+                <textarea
+                  className="form-control"
+                  rows="4"
+                  placeholder="Describe what your group accomplished and what needs staff review..."
+                  value={reviewMsg}
+                  onChange={(e) => setReviewMsg(e.target.value)}
+                  disabled={reviewSubmitting}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button type="button" onClick={() => setShowReviewModal(false)} className="btn btn--secondary" disabled={reviewSubmitting}>Cancel</button>
+                <button type="submit" className="btn btn--primary" disabled={reviewSubmitting}>
+                  {reviewSubmitting ? 'Submitting to Queue...' : '🚀 Submit Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add Project Modal */}
       {showProjectModal && (

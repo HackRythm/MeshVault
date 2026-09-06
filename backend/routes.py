@@ -1490,7 +1490,7 @@ def get_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Single group with members, projects, and workspace association."""
+    """Single group with members, projects, workspace association, activities, and review history."""
     grp = db.query(Group).filter(Group.id == group_id).first()
     if not grp:
         raise HTTPException(404, "Group not found")
@@ -1518,6 +1518,58 @@ def get_group(
 
     projects = db.query(Project).filter(Project.group_id == group_id).all()
     project_list = [_project_dict(p) for p in projects]
+    pids = [p.id for p in projects]
+
+    # Activities / Updates Log for group projects
+    activities_db = (
+        db.query(Activity)
+        .filter(Activity.project_id.in_(pids))
+        .order_by(Activity.created_at.desc())
+        .all()
+    ) if pids else []
+
+    activity_items = []
+    for a in activities_db:
+        u = db.query(User).filter(User.id == a.user_id).first()
+        pr = db.query(Project).filter(Project.id == a.project_id).first()
+        activity_items.append({
+            "id": f"act-{a.id}",
+            "activity_type": a.activity_type,
+            "message": a.message,
+            "user_name": u.name if u else "Unknown",
+            "user_role": u.role if u else "UNKNOWN",
+            "project_id": pr.project_id if pr else "",
+            "project_name": pr.name if pr else "",
+            "created_at": str(a.created_at),
+        })
+
+    # Review requests for group projects
+    reviews_db = (
+        db.query(ReviewRequest)
+        .filter(ReviewRequest.project_id.in_(pids))
+        .order_by(ReviewRequest.created_at.desc())
+        .all()
+    ) if pids else []
+
+    review_items = []
+    pending_reviews = []
+    for r in reviews_db:
+        u = db.query(User).filter(User.id == r.submitted_by).first()
+        pr = db.query(Project).filter(Project.id == r.project_id).first()
+        r_dict = {
+            "id": r.id,
+            "project_internal_id": r.project_id,
+            "project_id": pr.project_id if pr else "",
+            "project_name": pr.name if pr else "",
+            "submitted_by": u.name if u else "Unknown",
+            "request_type": r.request_type,
+            "message": r.message,
+            "status": r.status,
+            "created_at": str(r.created_at),
+        }
+        review_items.append(r_dict)
+        if r.status == "PENDING":
+            pending_reviews.append(r_dict)
 
     ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first() if grp.workspace_id else None
     wg = db.query(WorkspaceGroup).filter(
@@ -1541,7 +1593,61 @@ def get_group(
         "is_leader": membership.is_leader if (membership and current_user.role == "STUDENT") else False,
         "members": members,
         "projects": project_list,
+        "activities": activity_items,
+        "review_requests": review_items,
+        "pending_reviews": pending_reviews,
+        "pending_reviews_count": len(pending_reviews),
     }
+
+
+@router.get("/groups/{group_id}/activities")
+def get_group_activities(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve full activity and update history for a group."""
+    grp = db.query(Group).filter(Group.id == group_id).first()
+    if not grp:
+        raise HTTPException(404, "Group not found")
+
+    if current_user.role == "STUDENT":
+        membership = db.query(GroupMembership).filter(
+            GroupMembership.group_id == group_id,
+            GroupMembership.user_id == current_user.id
+        ).first()
+        if not membership:
+            raise HTTPException(status_code=403, detail="Forbidden: You are not a member of this group.")
+
+    projects = db.query(Project).filter(Project.group_id == group_id).all()
+    pids = [p.id for p in projects]
+    if not pids:
+        return []
+
+    activities = (
+        db.query(Activity)
+        .filter(Activity.project_id.in_(pids))
+        .order_by(Activity.created_at.desc())
+        .all()
+    )
+
+    activity_list = []
+    for a in activities:
+        u = db.query(User).filter(User.id == a.user_id).first()
+        pr = db.query(Project).filter(Project.id == a.project_id).first()
+        activity_list.append({
+            "id": a.id,
+            "user_id": a.user_id,
+            "user_name": u.name if u else "Unknown",
+            "user_role": u.role if u else "UNKNOWN",
+            "project_id": pr.project_id if pr else "",
+            "project_name": pr.name if pr else "",
+            "activity_type": a.activity_type,
+            "message": a.message,
+            "created_at": str(a.created_at),
+        })
+
+    return activity_list
 
 
 # ─── Projects ───────────────────────────────────────────────────────────────
@@ -1785,6 +1891,15 @@ def update_project(
     for key, val in body.model_dump(exclude_unset=True).items():
         setattr(proj, key, val)
 
+    # Activity log
+    act = Activity(
+        project_id=proj.id,
+        user_id=current_user.id,
+        activity_type="PROGRESS_UPDATED" if body.progress is not None else "PROJECT_UPDATED",
+        message=f"Project '{proj.name}' was updated by {current_user.name} (Progress: {proj.progress}%, Status: {proj.status})."
+    )
+    db.add(act)
+
     db.commit()
     db.refresh(proj)
 
@@ -1890,6 +2005,16 @@ def add_milestone(
         due_date=body.due_date,
     )
     db.add(ms)
+
+    # Activity log
+    act = Activity(
+        project_id=proj.id,
+        user_id=current_user.id,
+        activity_type="MILESTONE_ADDED",
+        message=f"Milestone '{ms.title}' added to project '{proj.name}'."
+    )
+    db.add(act)
+
     db.commit()
     db.refresh(ms)
 
@@ -2363,6 +2488,38 @@ def get_review_queue_next(
     return None
 
 
+@router.get("/review-queue/count")
+def get_review_queue_count(
+    workspace_id: Optional[int] = None,
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve count of pending review requests for staff."""
+    if current_user.role != "STAFF":
+        return {"count": 0}
+
+    q = request.app.state.review_queue
+    raw_items = list(q._items)
+    
+    count = 0
+    for item in raw_items:
+        proj = db.query(Project).filter(Project.id == item["project_id"]).first()
+        if not proj:
+            continue
+        wps = db.query(WorkspaceProject).filter(
+            WorkspaceProject.project_id == proj.id,
+            WorkspaceProject.status == "APPROVED"
+        ).all()
+        for wp in wps:
+            if workspace_id and wp.workspace_id != workspace_id:
+                continue
+            if has_workspace_access(wp.workspace_id, current_user, db):
+                count += 1
+                break
+    return {"count": count}
+
+
 @router.post("/review-queue", status_code=201)
 def submit_review_request(
     body: ReviewRequestCreate,
@@ -2399,6 +2556,16 @@ def submit_review_request(
         status="PENDING",
     )
     db.add(req)
+
+    # Activity log for Review Request
+    act = Activity(
+        project_id=proj.id,
+        user_id=current_user.id,
+        activity_type="REVIEW_REQUESTED",
+        message=f"Review requested by {submitter.name} [{body.request_type}]: {body.message}"
+    )
+    db.add(act)
+
     db.commit()
     db.refresh(req)
 
@@ -2432,13 +2599,21 @@ def process_review_request(
     if q.is_empty():
         raise HTTPException(400, "Review queue is empty")
     
-    # We should verify that the staff has access to the workspace of the dequeued item
     item = q.dequeue()
     
     # Update status in DB
     req = db.query(ReviewRequest).filter(ReviewRequest.id == item["id"]).first()
     if req:
         req.status = "PROCESSED"
+        proj = db.query(Project).filter(Project.id == req.project_id).first()
+        if proj:
+            act = Activity(
+                project_id=proj.id,
+                user_id=current_user.id,
+                activity_type="REVIEW_PROCESSED",
+                message=f"Review request '{req.request_type}' approved and processed by {current_user.name}."
+            )
+            db.add(act)
         db.commit()
         db.refresh(req)
     

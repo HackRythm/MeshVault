@@ -1,9 +1,28 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import projectService from '../services/projectService';
 
 export default function Sidebar() {
   const { user, logout } = useAuth();
+  const [pendingReviewCount, setPendingReviewCount] = useState(0);
+
+  useEffect(() => {
+    if (!user || user.role !== 'STAFF') return;
+
+    const checkPendingReviews = async () => {
+      try {
+        const res = await projectService.getReviewQueueCount();
+        setPendingReviewCount(res.count || 0);
+      } catch (err) {
+        // Silently ignore background polling errors
+      }
+    };
+
+    checkPendingReviews();
+    const interval = setInterval(checkPendingReviews, 6000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
@@ -17,7 +36,12 @@ export default function Sidebar() {
     { path: '/priority-engine', label: 'Priority Engine', icon: '⚡' },
     { path: '/progress-analytics', label: 'Progress Analytics', icon: '📈' },
     { path: '/sprint-optimizer', label: 'Sprint Optimizer', icon: '⏱️' },
-    ...(user && user.role === 'STAFF' ? [{ path: '/review-queue', label: 'Review Queue', icon: '📋' }] : []),
+    ...(user && user.role === 'STAFF' ? [{
+      path: '/review-queue',
+      label: 'Review Queue',
+      icon: '📋',
+      badge: pendingReviewCount > 0 ? pendingReviewCount : null
+    }] : []),
     { path: '/audit-trail', label: 'Audit Trail', icon: '📜' },
     { path: '/algorithm-lab', label: 'Algorithm Lab', icon: '🧪' },
     ...(user && user.role === 'STUDENT' ? [{ path: '/github', label: 'GitHub Sync', icon: '🐙' }] : []),
@@ -59,6 +83,22 @@ export default function Sidebar() {
               >
                 <span className="sidebar__icon">{item.icon}</span>
                 <span>{item.label}</span>
+                {item.badge != null && (
+                  <span
+                    className="badge badge--error"
+                    style={{
+                      marginLeft: 'auto',
+                      fontSize: '11px',
+                      padding: '2px 7px',
+                      borderRadius: '12px',
+                      fontWeight: '700',
+                      boxShadow: '0 0 8px rgba(255, 107, 107, 0.5)',
+                      animation: 'pulse 2s infinite'
+                    }}
+                  >
+                    {item.badge}
+                  </span>
+                )}
               </NavLink>
             </li>
           ))}

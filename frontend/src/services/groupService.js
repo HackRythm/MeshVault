@@ -13,6 +13,10 @@ const groupService = {
     return api.get(`/api/groups/${id}`);
   },
 
+  async getGroupActivities(groupId) {
+    return api.get(`/api/groups/${groupId}/activities`);
+  },
+
   async createGroup(name, code, description, workspaceCode) {
     return api.post('/api/groups', {
       name,

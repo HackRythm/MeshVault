@@ -118,6 +118,30 @@ export default function ReviewQueue() {
             </>
           )}
         </div>
+        <div className="page-header__actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {queue.length > 0 ? (
+            <span
+              className="badge badge--error"
+              style={{
+                fontSize: '12px',
+                padding: '6px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 0 10px rgba(255, 107, 107, 0.35)',
+              }}
+            >
+              🔔 {queue.length} Pending Submission{queue.length === 1 ? '' : 's'}
+            </span>
+          ) : (
+            <span className="badge badge--success" style={{ fontSize: '12px', padding: '6px 12px' }}>
+              ✓ All Reviews Cleared
+            </span>
+          )}
+          <button onClick={fetchQueueData} className="btn btn--secondary btn--sm" title="Refresh Review Queue">
+            🔄 Refresh
+          </button>
+        </div>
       </div>
 
       {error && <div className="login-card__error mb-24">{error}</div>}
