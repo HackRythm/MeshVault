@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -13,13 +15,11 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email || !password) {
-      setError('Please fill in all fields.');
+      setError('Please provide your email and password.');
       return;
     }
 
     setError('');
-    setLoading(false);
-
     try {
       setLoading(true);
       const res = await login(email, password);
@@ -29,54 +29,67 @@ export default function Login() {
         setError(res.message || 'Invalid credentials');
       }
     } catch (err) {
-      setError(err.message || 'An error occurred during login.');
+      setError(err.message || 'An error occurred during authentication.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="login-page">
-      <div className="login-card">
-        <div className="login-card__brand">
-          <div className="login-card__logo">MV</div>
-          <h2 className="login-card__title">MeshVault</h2>
-          <p className="login-card__subtitle">Academic Project Management with DSA</p>
+    <div className="min-h-screen w-full flex items-center justify-center bg-[#09090b] px-4">
+      <div className="w-full max-w-sm border border-zinc-800 rounded-lg bg-[#0c0c0e] p-6 shadow-2xl">
+        {/* Brand header */}
+        <div className="flex flex-col items-center text-center mb-6">
+          <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center text-sm font-bold text-white mb-3">
+            M
+          </div>
+          <h1 className="text-base font-semibold tracking-tight text-zinc-100">Sign in to MeshVault</h1>
+          <p className="text-xs text-zinc-400 mt-1">Academic Project Tracking & Evaluation System</p>
         </div>
 
-        {error && <div className="login-card__error">{error}</div>}
-
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label className="form-label" htmlFor="email">Email Address</label>
-            <input
-              id="email"
-              type="email"
-              className="form-input"
-              placeholder="name@university.edu"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+        {error && (
+          <div className="mb-4 p-2.5 bg-rose-950/40 border border-rose-800/60 rounded-md text-xs text-rose-300">
+            {error}
           </div>
+        )}
 
-          <div className="form-group" style={{ marginBottom: '24px' }}>
-            <label className="form-label" htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              className="form-input"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Input
+            label="University Email"
+            type="email"
+            placeholder="name@university.edu"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+          />
 
-          <button type="submit" className="btn btn--primary" disabled={loading}>
-            {loading ? 'Authenticating...' : 'Sign In'}
-          </button>
+          <Input
+            label="Password"
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+          />
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            className="w-full mt-2"
+            loading={loading}
+          >
+            Authenticate
+          </Button>
         </form>
+
+        <div className="mt-6 pt-4 border-t border-zinc-800/80 text-center">
+          <span className="text-[11px] text-zinc-500">
+            Protected academic portal • Amrita Vishwa Vidyapeetham
+          </span>
+        </div>
       </div>
     </div>
   );

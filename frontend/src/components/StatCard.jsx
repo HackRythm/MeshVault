@@ -1,33 +1,30 @@
 import React from 'react';
 
-export default function StatCard({ label, value, icon, color }) {
-  const getBgColor = () => {
-    switch (color) {
-      case 'success': return 'rgba(0, 206, 201, 0.1)';
-      case 'warning': return 'rgba(253, 203, 110, 0.1)';
-      case 'error': return 'rgba(255, 107, 107, 0.1)';
-      case 'info': return 'rgba(116, 185, 255, 0.1)';
-      default: return 'var(--accent-glow)';
-    }
-  };
-
-  const getTextColor = () => {
-    switch (color) {
-      case 'success': return 'var(--clr-success)';
-      case 'warning': return 'var(--clr-warning)';
-      case 'error': return 'var(--clr-error)';
-      case 'info': return 'var(--clr-info)';
-      default: return 'var(--accent-light)';
-    }
-  };
-
+export function StatCard({ label, value, subtext, badge, className = '' }) {
   return (
-    <div className="stat-card">
-      <div className="stat-card__icon" style={{ backgroundColor: getBgColor(), color: getTextColor() }}>
-        {icon}
+    <div className={`p-3.5 bg-[#0c0c0e] border border-zinc-800 rounded-lg flex flex-col justify-between ${className}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-semibold tracking-wider text-zinc-400 uppercase">
+          {label}
+        </span>
+        {badge && (
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800">
+            {badge}
+          </span>
+        )}
       </div>
-      <div className="stat-card__value">{value}</div>
-      <div className="stat-card__label">{label}</div>
+      <div className="mt-2 flex items-baseline gap-2">
+        <span className="text-2xl font-bold tracking-tight text-zinc-100 tabular-nums">
+          {value}
+        </span>
+        {subtext && (
+          <span className="text-[11px] text-zinc-500 truncate">
+            {subtext}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
+
+export default StatCard;

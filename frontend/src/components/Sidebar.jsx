@@ -1,5 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Layers,
+  Users,
+  FolderGit2,
+  GraduationCap,
+  Search,
+  Zap,
+  TrendingUp,
+  Clock,
+  ClipboardList,
+  History,
+  FlaskConical,
+  GitBranch,
+  User,
+  LogOut,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import projectService from '../services/projectService';
 
@@ -24,108 +41,114 @@ export default function Sidebar() {
     return () => clearInterval(interval);
   }, [user]);
 
-  const navItems = [
-    { path: '/dashboard', label: 'Dashboard', icon: '📊' },
-    { path: '/workspace', label: 'Workspace', icon: '📂' },
-    { path: '/groups', label: 'Groups', icon: '👥' },
-    { path: '/projects', label: 'Projects', icon: '📁' },
-    ...(user && user.role === 'STUDENT' ? [{ path: '/my-grades', label: 'My Results', icon: '🎓' }] : []),
-    { path: '/search', label: 'Smart Search', icon: '🔍' },
+  const coreNav = [
+    { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/workspace', label: 'Workspace', icon: Layers },
+    { path: '/groups', label: 'Groups', icon: Users },
+    { path: '/projects', label: 'Projects', icon: FolderGit2 },
+    ...(user?.role === 'STUDENT' ? [{ path: '/my-grades', label: 'My Results', icon: GraduationCap }] : []),
+    { path: '/search', label: 'Smart Search', icon: Search },
   ];
 
-  const buildingItems = [
-    { path: '/priority-engine', label: 'Priority Engine', icon: '⚡' },
-    { path: '/progress-analytics', label: 'Progress Analytics', icon: '📈' },
-    { path: '/sprint-optimizer', label: 'Sprint Optimizer', icon: '⏱️' },
-    ...(user && user.role === 'STAFF' ? [{
+  const dsaNav = [
+    { path: '/priority-engine', label: 'Priority Engine', icon: Zap },
+    { path: '/progress-analytics', label: 'Progress Analytics', icon: TrendingUp },
+    { path: '/sprint-optimizer', label: 'Sprint Optimizer', icon: Clock },
+    ...(user?.role === 'STAFF' ? [{
       path: '/review-queue',
       label: 'Review Queue',
-      icon: '📋',
-      badge: pendingReviewCount > 0 ? pendingReviewCount : null
+      icon: ClipboardList,
+      badge: pendingReviewCount > 0 ? pendingReviewCount : null,
     }] : []),
-    { path: '/audit-trail', label: 'Audit Trail', icon: '📜' },
-    { path: '/algorithm-lab', label: 'Algorithm Lab', icon: '🧪' },
-    ...(user && user.role === 'STUDENT' ? [{ path: '/github', label: 'GitHub Sync', icon: '🐙' }] : []),
+    { path: '/audit-trail', label: 'Audit Trail', icon: History },
+    { path: '/algorithm-lab', label: 'Algorithm Lab', icon: FlaskConical },
+    ...(user?.role === 'STUDENT' ? [{ path: '/github', label: 'GitHub Sync', icon: GitBranch }] : []),
   ];
 
+  const renderLink = (item) => {
+    const Icon = item.icon;
+    return (
+      <NavLink
+        key={item.path}
+        to={item.path}
+        className={({ isActive }) =>
+          `flex items-center gap-2.5 px-3 py-1.5 text-xs rounded transition-colors ${
+            isActive
+              ? 'bg-zinc-800/80 text-zinc-100 font-medium border-l-2 border-blue-500 pl-2.5'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 font-normal'
+          }`
+        }
+      >
+        <Icon className="w-3.5 h-3.5 flex-shrink-0 opacity-80" />
+        <span className="truncate flex-1">{item.label}</span>
+        {item.badge != null && (
+          <span className="ml-auto font-mono text-[10px] px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50">
+            {item.badge}
+          </span>
+        )}
+      </NavLink>
+    );
+  };
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar__brand">
-        <div className="sidebar__logo">MV</div>
-        <h1 className="sidebar__title">MeshVault</h1>
+    <aside className="w-56 bg-[#0c0c0e] border-r border-zinc-800/80 flex flex-col h-screen select-none">
+      {/* Brand Header */}
+      <div className="h-12 px-4 border-b border-zinc-800/80 flex items-center gap-2.5">
+        <div className="w-5 h-5 rounded bg-blue-600 flex items-center justify-center text-[11px] font-bold text-white tracking-wider">
+          M
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <span className="font-semibold text-xs tracking-tight text-zinc-100">MeshVault</span>
+          <span className="text-[10px] font-mono text-zinc-400">v1.0</span>
+        </div>
       </div>
 
-      <nav style={{ flex: 1 }}>
-        <div className="sidebar__section-label">Core Modules</div>
-        <ul className="sidebar__nav">
-          {navItems.map((item) => (
-            <li key={item.path}>
-              <NavLink
-                to={item.path}
-                className={({ isActive }) =>
-                  `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
-                }
-              >
-                <span className="sidebar__icon">{item.icon}</span>
-                <span>{item.label}</span>
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-
-        <ul className="sidebar__nav" style={{ marginTop: '16px' }}>
-          {buildingItems.map((item) => (
-            <li key={item.path}>
-              <NavLink
-                to={item.path}
-                className={({ isActive }) =>
-                  `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
-                }
-              >
-                <span className="sidebar__icon">{item.icon}</span>
-                <span>{item.label}</span>
-                {item.badge != null && (
-                  <span
-                    className="badge badge--error"
-                    style={{
-                      marginLeft: 'auto',
-                      fontSize: '11px',
-                      padding: '2px 7px',
-                      borderRadius: '12px',
-                      fontWeight: '700',
-                      boxShadow: '0 0 8px rgba(255, 107, 107, 0.5)',
-                      animation: 'pulse 2s infinite'
-                    }}
-                  >
-                    {item.badge}
-                  </span>
-                )}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      </nav>
-
-      <div className="sidebar__bottom">
-        <div className="sidebar__nav">
-          <NavLink
-            to="/profile"
-            className={({ isActive }) =>
-              `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
-            }
-          >
-            <span className="sidebar__icon">👤</span>
-            <span>Profile</span>
-          </NavLink>
-          <button
-            onClick={logout}
-            className="sidebar__link"
-            style={{ width: '100%', background: 'none', border: 'none', textAlign: 'left' }}
-          >
-            <span className="sidebar__icon">🚪</span>
-            <span>Logout</span>
-          </button>
+      {/* Navigation list */}
+      <div className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
+        {/* Core Modules */}
+        <div>
+          <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            Core Modules
+          </div>
+          <nav className="space-y-0.5">
+            {coreNav.map(renderLink)}
+          </nav>
         </div>
+
+        {/* DSA & Analysis */}
+        <div>
+          <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            DSA Engines
+          </div>
+          <nav className="space-y-0.5">
+            {dsaNav.map(renderLink)}
+          </nav>
+        </div>
+      </div>
+
+      {/* Bottom Profile & Logout */}
+      <div className="p-2 border-t border-zinc-800/80 space-y-0.5">
+        <NavLink
+          to="/profile"
+          className={({ isActive }) =>
+            `flex items-center gap-2.5 px-3 py-1.5 text-xs rounded transition-colors ${
+              isActive
+                ? 'bg-zinc-800/80 text-zinc-100 font-medium border-l-2 border-blue-500 pl-2.5'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40'
+            }`
+          }
+        >
+          <User className="w-3.5 h-3.5 flex-shrink-0 opacity-80" />
+          <span className="truncate">Profile</span>
+        </NavLink>
+        <button
+          type="button"
+          onClick={logout}
+          className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs rounded text-zinc-400 hover:text-rose-300 hover:bg-rose-950/20 transition-colors text-left"
+        >
+          <LogOut className="w-3.5 h-3.5 flex-shrink-0 opacity-80" />
+          <span>Sign Out</span>
+        </button>
       </div>
     </aside>
   );
