@@ -771,7 +771,7 @@ export default function Workspace() {
 
                   const handleReleaseFromRegistry = async (gradeId, studentName) => {
                     try {
-                      await projectService.releaseStudentGrade(selectedWs.id, '', gradeId);
+                      await projectService.releaseStudentGradeDirect(selectedWs.id, gradeId);
                       // reload
                       const data = await workspaceService.getWorkspaceStudentGrades(selectedWs.id);
                       setWorkspaceGrades(data || []);

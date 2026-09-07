@@ -142,6 +142,13 @@ const projectService = {
     );
   },
 
+  /** Release a grade directly by workspace + grade ID (no project_id needed). Faculty only. */
+  async releaseStudentGradeDirect(workspaceId, gradeId) {
+    return api.post(
+      `/api/workspaces/${workspaceId}/student-grades/${gradeId}/release`
+    );
+  },
+
   /** Get current student's own released grades. Student only. */
   async getMyGrade(workspaceId, projectId) {
     return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/my-grade`);

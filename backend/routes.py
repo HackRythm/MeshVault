@@ -3136,10 +3136,11 @@ def _student_grade_out(sg, db) -> dict:
     """Serialize a StudentGrade record."""
     student = db.query(User).filter(User.id == sg.student_id).first()
     evaluator = db.query(User).filter(User.id == sg.evaluator_id).first()
+    proj = db.query(Project).filter(Project.id == sg.project_id).first()
     return {
         "id": sg.id,
         "workspace_id": sg.workspace_id,
-        "project_id": sg.project_id,
+        "project_id": proj.project_id if proj else str(sg.project_id),
         "student_id": sg.student_id,
         "student_name": student.name if student else "Unknown",
         "student_user_id": student.user_id if student else "",
@@ -3179,6 +3180,42 @@ def list_workspace_student_grades(
         .all()
     )
     return [_student_grade_out(g, db) for g in grades]
+
+
+@router.post("/workspaces/{workspace_id}/student-grades/{grade_id}/release")
+def release_student_grade_direct(
+    workspace_id: int,
+    grade_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Release a student grade directly by workspace + grade ID (no project_id needed).
+    Used by the Workspace gradebook view. Staff only."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden: not the workspace host")
+
+    grade = db.query(StudentGrade).filter(
+        StudentGrade.id == grade_id,
+        StudentGrade.workspace_id == workspace_id,
+    ).first()
+    if not grade:
+        raise HTTPException(status_code=404, detail="Grade record not found")
+
+    if grade.is_released:
+        return {"success": True, "message": "Already released"}
+
+    grade.is_released = True
+    grade.released_at = datetime.utcnow()
+    db.commit()
+    db.refresh(grade)
+
+    return {"success": True, "grade": _student_grade_out(grade, db)}
 
 
 @router.get("/workspaces/{workspace_id}/projects/{project_id}/student-grades")
