@@ -3,6 +3,7 @@ MeshVault API Routes
 All API endpoints for the MeshVault local backend.
 """
 
+import json as _json
 import secrets
 from datetime import date, datetime
 from typing import Optional, List
@@ -3338,6 +3339,43 @@ def get_my_grade(
         .all()
     )
     return [_student_grade_out(g, db) for g in grades]
+
+
+@router.get("/student/my-grades")
+def get_all_my_grades(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Student: fetch ALL released grades across every workspace and project.
+    Returns only this student's records where is_released = True.
+    Includes workspace name, project name, and group name for context."""
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: this endpoint is for students only")
+
+    grades = (
+        db.query(StudentGrade)
+        .filter(
+            StudentGrade.student_id == current_user.id,
+            StudentGrade.is_released == True,
+        )
+        .order_by(StudentGrade.created_at.desc())
+        .all()
+    )
+
+    results = []
+    for g in grades:
+        base = _student_grade_out(g, db)
+        # Enrich with workspace / project / group context
+        ws = db.query(Workspace).filter(Workspace.id == g.workspace_id).first()
+        proj = db.query(Project).filter(Project.id == g.project_id).first()
+        grp = db.query(Group).filter(Group.id == proj.group_id).first() if proj else None
+        base["workspace_name"] = ws.name if ws else "Unknown"
+        base["project_name"] = proj.name if proj else "Unknown"
+        base["project_project_id"] = proj.project_id if proj else ""
+        base["group_name"] = grp.name if grp else "Unknown"
+        results.append(base)
+
+    return results
 
 
 @router.get("/workspaces/{workspace_id}/projects/{project_id}")

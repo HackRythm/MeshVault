@@ -146,6 +146,11 @@ const projectService = {
   async getMyGrade(workspaceId, projectId) {
     return api.get(`/api/workspaces/${workspaceId}/projects/${projectId}/my-grade`);
   },
+
+  /** Get ALL released grades for the current student across all workspaces/projects. Student only. */
+  async getAllMyGrades() {
+    return api.get('/api/student/my-grades');
+  },
 };
 
 export default projectService;

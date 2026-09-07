@@ -19,6 +19,7 @@ import Building from './pages/Building';
 import ProgressAnalytics from './pages/ProgressAnalytics';
 import ReviewQueue from './pages/ReviewQueue';
 import AuditTrail from './pages/AuditTrail';
+import MyGrades from './pages/MyGrades';
 
 // Protected Route Wrapper
 function PrivateRoute({ children }) {
@@ -46,6 +47,11 @@ export default function App() {
       <Route path="/projects/:projectId/edit" element={<PrivateRoute><EditProject /></PrivateRoute>} />
       <Route path="/search" element={<PrivateRoute><SmartSearch /></PrivateRoute>} />
       <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
+      <Route path="/my-grades" element={
+        <PrivateRoute>
+          {user && user.role === 'STUDENT' ? <MyGrades /> : <Navigate to="/dashboard" replace />}
+        </PrivateRoute>
+      } />
 
       {/* Unimplemented modules showing Building page */}
       <Route path="/priority-engine" element={<PrivateRoute><Building title="Priority Engine" /></PrivateRoute>} />

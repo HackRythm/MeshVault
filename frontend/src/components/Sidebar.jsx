@@ -29,6 +29,7 @@ export default function Sidebar() {
     { path: '/workspace', label: 'Workspace', icon: '📂' },
     { path: '/groups', label: 'Groups', icon: '👥' },
     { path: '/projects', label: 'Projects', icon: '📁' },
+    ...(user && user.role === 'STUDENT' ? [{ path: '/my-grades', label: 'My Results', icon: '🎓' }] : []),
     { path: '/search', label: 'Smart Search', icon: '🔍' },
   ];
 
