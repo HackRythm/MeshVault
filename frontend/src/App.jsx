@@ -16,6 +16,10 @@ import CreateWorkspace from './pages/CreateWorkspace';
 import SmartSearch from './pages/SmartSearch';
 import Profile from './pages/Profile';
 import Building from './pages/Building';
+import PriorityEngine from './pages/PriorityEngine';
+import SprintOptimizer from './pages/SprintOptimizer';
+import AlgorithmLab from './pages/AlgorithmLab';
+import GitHubSync from './pages/GitHubSync';
 import ProgressAnalytics from './pages/ProgressAnalytics';
 import ReviewQueue from './pages/ReviewQueue';
 import AuditTrail from './pages/AuditTrail';
@@ -54,17 +58,17 @@ export default function App() {
       } />
 
       {/* Unimplemented modules showing Building page */}
-      <Route path="/priority-engine" element={<PrivateRoute><Building title="Priority Engine" /></PrivateRoute>} />
+      <Route path="/priority-engine" element={<PrivateRoute><PriorityEngine /></PrivateRoute>} />
       <Route path="/progress-analytics" element={<PrivateRoute><ProgressAnalytics /></PrivateRoute>} />
-      <Route path="/sprint-optimizer" element={<PrivateRoute><Building title="Sprint Optimizer" /></PrivateRoute>} />
+      <Route path="/sprint-optimizer" element={<PrivateRoute><SprintOptimizer /></PrivateRoute>} />
       <Route path="/review-queue" element={
         <PrivateRoute>
           {user && user.role === 'STAFF' ? <ReviewQueue /> : <Navigate to="/dashboard" replace />}
         </PrivateRoute>
       } />
       <Route path="/audit-trail" element={<PrivateRoute><AuditTrail /></PrivateRoute>} />
-      <Route path="/algorithm-lab" element={<PrivateRoute><Building title="Algorithm Lab" /></PrivateRoute>} />
-      <Route path="/github" element={<PrivateRoute><Building title="GitHub Sync Engine" /></PrivateRoute>} />
+      <Route path="/algorithm-lab" element={<PrivateRoute><AlgorithmLab /></PrivateRoute>} />
+      <Route path="/github" element={<PrivateRoute><GitHubSync /></PrivateRoute>} />
 
       {/* Redirect fallbacks */}
       <Route path="/" element={<Navigate to="/login" replace />} />
