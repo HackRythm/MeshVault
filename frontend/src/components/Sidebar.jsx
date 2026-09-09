@@ -12,7 +12,6 @@ import {
   Clock,
   ClipboardList,
   History,
-  FlaskConical,
   GitBranch,
   User,
   LogOut,
@@ -61,7 +60,6 @@ export default function Sidebar() {
       badge: pendingReviewCount > 0 ? pendingReviewCount : null,
     }] : []),
     { path: '/audit-trail', label: 'Audit Trail', icon: History },
-    { path: '/algorithm-lab', label: 'Algorithm Lab', icon: FlaskConical },
     ...(user?.role === 'STUDENT' ? [{ path: '/github', label: 'GitHub Sync', icon: GitBranch }] : []),
   ];
 
@@ -115,11 +113,8 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* DSA & Analysis */}
-        <div>
-          <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
-            DSA Engines
-          </div>
+        {/* Other Modules */}
+        <div className="pt-2 border-t border-zinc-800/60">
           <nav className="space-y-0.5">
             {dsaNav.map(renderLink)}
           </nav>
