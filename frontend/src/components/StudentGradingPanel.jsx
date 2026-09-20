@@ -3,6 +3,7 @@ import projectService from '../services/projectService';
 import workspaceService from '../services/workspaceService';
 
 export default function StudentGradingPanel({ workspaceId, projectId, groupName, members = [] }) {
+  const eligibleStudents = members.filter(m => !m.role || m.role === 'STUDENT');
   const [gradingScheme, setGradingScheme] = useState(null);
   const [studentGrades, setStudentGrades] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +35,7 @@ export default function StudentGradingPanel({ workspaceId, projectId, groupName,
 
       // 3. Initialize default form state for each student member
       const initialForm = {};
-      members.forEach((m) => {
+      eligibleStudents.forEach((m) => {
         const critScores = {};
         if (scheme && scheme.criteria && scheme.criteria.length > 0) {
           scheme.criteria.forEach((c) => {
@@ -220,11 +221,11 @@ export default function StudentGradingPanel({ workspaceId, projectId, groupName,
         </div>
       )}
 
-      {members.length === 0 ? (
+      {eligibleStudents.length === 0 ? (
         <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No student members found in this group.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {members.map((student) => {
+          {eligibleStudents.map((student) => {
             const studentHistory = studentGrades.filter((g) => g.student_id === student.id);
             const latestGrade = studentHistory[0]; // ordered newest first
             const currentState = formState[student.id] || { criterionScores: {}, totalScore: '', notes: '' };

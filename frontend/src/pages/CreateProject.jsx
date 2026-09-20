@@ -5,8 +5,10 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import projectService from '../services/projectService';
 import groupService from '../services/groupService';
 import workspaceService from '../services/workspaceService';
+import { useAuth } from '../context/AuthContext';
 
 export default function CreateProject() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const workspaceIdFromUrl = searchParams.get('workspace_id');
 
@@ -31,6 +33,11 @@ export default function CreateProject() {
 
   // 1. Fetch workspaces listing
   useEffect(() => {
+    if (user && user.role !== 'STUDENT') {
+      setError('Forbidden: Only student team members can create projects.');
+      setLoading(false);
+      return;
+    }
     const init = async () => {
       try {
         const wsList = await workspaceService.getWorkspaces();

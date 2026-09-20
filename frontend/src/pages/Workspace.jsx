@@ -23,6 +23,16 @@ export default function Workspace() {
   const [showAccessModal, setShowAccessModal] = useState(false);
   const [showSchemeModal, setShowSchemeModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  // Edit workspace state (Staff)
+  const [editName, setEditName] = useState('');
+  const [editCourseCode, setEditCourseCode] = useState('');
+  const [editCourseName, setEditCourseName] = useState('');
+  const [editAcademicYear, setEditAcademicYear] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState('');
 
   // Join workspace state (Student)
   const [joinWsCode, setJoinWsCode] = useState('');
@@ -232,6 +242,44 @@ export default function Workspace() {
       setJoinError(err.message || 'Failed to submit join request.');
     } finally {
       setJoinSubmitting(false);
+    }
+  };
+
+  const handleOpenEditModal = () => {
+    if (!selectedWs) return;
+    setEditName(selectedWs.name || '');
+    setEditCourseCode(selectedWs.course_code || '');
+    setEditCourseName(selectedWs.course_name || '');
+    setEditAcademicYear(selectedWs.academic_year || '');
+    setEditDescription(selectedWs.description || '');
+    setEditError('');
+    setShowEditModal(true);
+  };
+
+  const handleSaveEditWorkspace = async (e) => {
+    e.preventDefault();
+    if (!editName.trim() || !editCourseCode.trim() || !editCourseName.trim()) {
+      setEditError('Workspace Name, Course Code, and Course Name are required.');
+      return;
+    }
+    setEditSubmitting(true);
+    setEditError('');
+    try {
+      const updated = await workspaceService.updateWorkspace(selectedWs.id, {
+        name: editName.trim(),
+        course_code: editCourseCode.trim(),
+        course_name: editCourseName.trim(),
+        academic_year: editAcademicYear.trim(),
+        description: editDescription.trim() || null,
+      });
+      setShowEditModal(false);
+      const list = await workspaceService.getWorkspaces(user.id, user.role);
+      setWorkspaces(list);
+      setSelectedWs(updated);
+    } catch (err) {
+      setEditError(err.message || 'Failed to update workspace.');
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -518,6 +566,9 @@ export default function Workspace() {
                 setSchemeError('');
               }} className="btn btn--secondary">
                 📋 Grading Scheme
+              </button>
+              <button onClick={handleOpenEditModal} className="btn btn--secondary">
+                ✏️ Edit Workspace
               </button>
             </>
           )}
@@ -1107,6 +1158,90 @@ export default function Workspace() {
                 </button>
                 <button type="submit" className="btn btn--primary" disabled={joinSubmitting}>
                   {joinSubmitting ? 'Submitting Request...' : 'Submit Join Request'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Workspace Modal for Staff */}
+      {showEditModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowEditModal(false)}>
+          <div style={modalContentStyle} onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-16">
+              <h3 className="modal__title">✏️ Edit Academic Workspace</h3>
+              <button onClick={() => setShowEditModal(false)} className="btn btn--ghost btn--sm">✕</button>
+            </div>
+
+            {editError && <div className="login-card__error mb-16">{editError}</div>}
+
+            <form onSubmit={handleSaveEditWorkspace}>
+              <div className="form-group mb-12">
+                <label className="form-label">Course Code *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editCourseCode}
+                  onChange={(e) => setEditCourseCode(e.target.value)}
+                  placeholder="e.g. CS201"
+                  required
+                />
+              </div>
+
+              <div className="form-group mb-12">
+                <label className="form-label">Course Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editCourseName}
+                  onChange={(e) => setEditCourseName(e.target.value)}
+                  placeholder="e.g. Data Structures & Algorithms"
+                  required
+                />
+              </div>
+
+              <div className="form-group mb-12">
+                <label className="form-label">Workspace Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="e.g. DSA Lab Workspace"
+                  required
+                />
+              </div>
+
+              <div className="form-group mb-12">
+                <label className="form-label">Academic Year *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editAcademicYear}
+                  onChange={(e) => setEditAcademicYear(e.target.value)}
+                  placeholder="e.g. 2025-2026"
+                  required
+                />
+              </div>
+
+              <div className="form-group mb-20">
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-textarea"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Workspace description..."
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex gap-12" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowEditModal(false)} className="btn btn--secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--primary" disabled={editSubmitting}>
+                  {editSubmitting ? 'Saving Changes...' : 'Save Changes'}
                 </button>
               </div>
             </form>

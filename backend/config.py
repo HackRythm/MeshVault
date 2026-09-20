@@ -19,6 +19,7 @@ load_dotenv(root_dir / ".env")
 DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 SECRET_KEY: str = os.getenv("SECRET_KEY", "")
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
 ALLOWED_ORIGINS: list[str] = [
     origin.strip()
     for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")

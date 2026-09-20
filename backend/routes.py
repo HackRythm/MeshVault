@@ -16,16 +16,20 @@ from database import get_db
 from models import (
     User, Workspace, Group, GroupMembership, Project, Milestone, Activity, ReviewRequest,
     UserSession, WorkspaceAccess, GradingScheme, GradingCriterion, ReviewComment,
-    WorkspaceGroup, WorkspaceProject, ProjectEvaluation, StudentGrade
+    WorkspaceGroup, WorkspaceProject, ProjectEvaluation, StudentGrade, ProjectGitHub
 )
 from pydantic import BaseModel
 from schemas import (
     LoginRequest, ProjectCreate, ProjectUpdate, MilestoneCreate, ReviewRequestCreate, WorkspaceCreate,
-    WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate, GroupCreate, GroupJoinRequest,
+    WorkspaceUpdate, WorkspaceAccessUpdate, GradingSchemeCreate, ReviewCommentCreate, GroupCreate, GroupJoinRequest,
     WorkspaceJoinRequest, WorkspaceRequestProcess, DirectRemovalRequest, EvaluationCreate,
-    StudentGradeCreate, GroupJoinWorkspaceRequest
+    StudentGradeCreate, GroupJoinWorkspaceRequest, GitHubConnectRequest
 )
 from auth import authenticate_user
+from github_service import (
+    parse_github_url, fetch_repo_info, fetch_commits, fetch_contributors,
+    fetch_issues, fetch_pulls
+)
 
 router = APIRouter(prefix="/api")
 
@@ -48,14 +52,26 @@ def get_current_user(
 
 
 def has_workspace_access(workspace_id: int, current_user: User, db: Session) -> bool:
-    """Check if user has APPROVED access to a workspace."""
+    """Check if user has access to a workspace."""
     ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
     if not ws:
         return False
 
-    # Staff who created the workspace always has access
-    if current_user.role == "STAFF" and ws.created_by == current_user.id:
+    # Staff users have access to all workspaces or workspaces they created/supervise
+    if current_user.role == "STAFF":
         return True
+
+    # Check if student's group has an APPROVED WorkspaceGroup link
+    mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
+    user_gids = [m.group_id for m in mems]
+    if user_gids:
+        wg = db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.workspace_id == workspace_id,
+            WorkspaceGroup.group_id.in_(user_gids),
+            WorkspaceGroup.status == "APPROVED"
+        ).first()
+        if wg:
+            return True
 
     # Check for an APPROVED WorkspaceAccess record
     access = db.query(WorkspaceAccess).filter(
@@ -63,8 +79,14 @@ def has_workspace_access(workspace_id: int, current_user: User, db: Session) -> 
         WorkspaceAccess.user_id == current_user.id,
         WorkspaceAccess.status == "APPROVED"
     ).first()
-    return access is not None
+    if access:
+        return True
 
+    # If workspace is public (not restricted), any authenticated user has read access
+    if not ws.is_restricted:
+        return True
+
+    return False
 
 
 def has_project_access(project, current_user: User, db: Session) -> bool:
@@ -75,17 +97,19 @@ def has_project_access(project, current_user: User, db: Session) -> bool:
         ).first()
         if mems:
             return True
-
-    wps = db.query(WorkspaceProject).filter(
-        WorkspaceProject.project_id == project.id,
-        WorkspaceProject.status == "APPROVED"
-    ).all()
-    if not wps:
         return False
 
-    for wp in wps:
-        if has_workspace_access(wp.workspace_id, current_user, db):
+    if current_user.role == "STAFF":
+        wps = db.query(WorkspaceProject).filter(
+            WorkspaceProject.project_id == project.id,
+            WorkspaceProject.status == "APPROVED"
+        ).all()
+        if not wps:
             return True
+        for wp in wps:
+            if has_workspace_access(wp.workspace_id, current_user, db):
+                return True
+        return True
 
     return False
 
@@ -160,29 +184,45 @@ def list_workspaces(
 ):
     """List workspaces visible to the current user."""
     if current_user.role == "STUDENT":
-        # Students see workspaces where they have APPROVED access
-        access_records = db.query(WorkspaceAccess).filter(
+        # Students see workspaces where their group is approved, or where they have WorkspaceAccess, or unrestricted
+        mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
+        user_gids = [m.group_id for m in mems]
+        wg_wids = [wg.workspace_id for wg in db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.group_id.in_(user_gids),
+            WorkspaceGroup.status == "APPROVED"
+        ).all()] if user_gids else []
+        
+        access_wids = [a.workspace_id for a in db.query(WorkspaceAccess).filter(
             WorkspaceAccess.user_id == current_user.id,
             WorkspaceAccess.status == "APPROVED"
-        ).all()
-        wids = [a.workspace_id for a in access_records]
-        if not wids:
-            return []
-        workspaces = db.query(Workspace).filter(Workspace.id.in_(wids)).all()
-    elif current_user.role == "STAFF":
-        workspaces = db.query(Workspace).filter(Workspace.created_by == current_user.id).all()
+        ).all()]
+        
+        public_wids = [w.id for w in db.query(Workspace.id).filter(Workspace.is_restricted == False).all()]
+        
+        all_visible_wids = list(set(wg_wids + access_wids + public_wids))
+        workspaces = db.query(Workspace).filter(Workspace.id.in_(all_visible_wids)).all() if all_visible_wids else []
     else:
         workspaces = db.query(Workspace).all()
 
     result = []
     for w in workspaces:
-        ws_groups = db.query(Group).filter(Group.workspace_id == w.id).all()
-        gids = [g.id for g in ws_groups]
+        # Use canonical WorkspaceGroup
+        approved_wgs = db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.workspace_id == w.id,
+            WorkspaceGroup.status == "APPROVED"
+        ).all()
+        gids = [wg.group_id for wg in approved_wgs]
+        
         student_count = (
             db.query(GroupMembership).filter(GroupMembership.group_id.in_(gids)).count()
             if gids else 0
         )
-        project_count = db.query(Project).filter(Project.group_id.in_(gids)).count() if gids else 0
+        project_count = (
+            db.query(WorkspaceProject).filter(
+                WorkspaceProject.workspace_id == w.id,
+                WorkspaceProject.status == "APPROVED"
+            ).count()
+        )
 
         # Count pending join requests for staff
         pending_count = 0
@@ -202,7 +242,7 @@ def list_workspaces(
             "description": w.description,
             "created_by": w.created_by,
             "created_at": str(w.created_at),
-            "group_count": len(ws_groups),
+            "group_count": len(gids),
             "project_count": project_count,
             "student_count": student_count,
             "is_restricted": w.is_restricted,
@@ -269,6 +309,51 @@ def create_workspace(
     }
 
 
+@router.put("/workspaces/{workspace_id}", status_code=200)
+def update_workspace(
+    workspace_id: int,
+    body: WorkspaceUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update workspace details (owner/staff only)."""
+    if current_user.role != "STAFF":
+        raise HTTPException(status_code=403, detail="Only staff can edit workspaces.")
+
+    ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if ws.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Forbidden: You can only edit workspaces you created.")
+
+    if body.name is not None and body.name.strip():
+        ws.name = body.name.strip()
+    if body.course_code is not None and body.course_code.strip():
+        ws.course_code = body.course_code.strip()
+    if body.course_name is not None and body.course_name.strip():
+        ws.course_name = body.course_name.strip()
+    if body.academic_year is not None and body.academic_year.strip():
+        ws.academic_year = body.academic_year.strip()
+    if body.description is not None:
+        ws.description = body.description.strip() if body.description else None
+
+    db.commit()
+    db.refresh(ws)
+
+    return {
+        "id": ws.id,
+        "workspace_id": ws.workspace_id,
+        "name": ws.name,
+        "course_code": ws.course_code,
+        "course_name": ws.course_name,
+        "academic_year": ws.academic_year,
+        "description": ws.description,
+        "created_by": ws.created_by,
+        "created_at": str(ws.created_at),
+        "join_code": ws.join_code,
+    }
+
+
 @router.delete("/workspaces/{workspace_id}", status_code=200)
 def delete_workspace(
     workspace_id: int,
@@ -316,12 +401,36 @@ def get_workspace(
     if not ws:
         raise HTTPException(404, "Workspace not found")
 
-    # Fetch groups directly linked to this workspace
-    groups_query = db.query(Group).filter(Group.workspace_id == workspace_id)
+    # Fetch groups linked to this workspace via WorkspaceGroup or direct workspace_id
+    approved_wgs = db.query(WorkspaceGroup).filter(
+        WorkspaceGroup.workspace_id == workspace_id,
+        WorkspaceGroup.status == "APPROVED"
+    ).all()
+    wg_gids = [wg.group_id for wg in approved_wgs]
+    direct_gids = [g.id for g in db.query(Group).filter(Group.workspace_id == workspace_id).all()]
+    all_group_ids = list(set(wg_gids + direct_gids))
 
-    # Fetch projects belonging to groups in this workspace
-    all_group_ids = [g.id for g in db.query(Group).filter(Group.workspace_id == workspace_id).all()]
-    projects_query = db.query(Project).filter(Project.group_id.in_(all_group_ids)) if all_group_ids else db.query(Project).filter(False)
+    if all_group_ids:
+        groups_query = db.query(Group).filter(
+            Group.id.in_(all_group_ids),
+            (Group.workspace_id == None) | (Group.workspace_id == workspace_id)
+        )
+    else:
+        groups_query = db.query(Group).filter(False)
+
+    # Fetch projects linked to this workspace via WorkspaceProject
+    approved_wps = db.query(WorkspaceProject).filter(
+        WorkspaceProject.workspace_id == workspace_id,
+        WorkspaceProject.status == "APPROVED"
+    ).all()
+    all_project_ids = [wp.project_id for wp in approved_wps]
+    if all_project_ids:
+        projects_query = db.query(Project).filter(
+            Project.id.in_(all_project_ids),
+            Project.group_id.in_(all_group_ids) if all_group_ids else True
+        )
+    else:
+        projects_query = db.query(Project).filter(False)
 
     if current_user.role == "STUDENT":
         mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
@@ -1056,14 +1165,17 @@ def list_groups(
 
     query = db.query(Group)
     if workspace_id:
-        query = query.filter(Group.workspace_id == workspace_id)
+        approved_wgs = db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.workspace_id == workspace_id,
+            WorkspaceGroup.status == "APPROVED"
+        ).all()
+        gids = [wg.group_id for wg in approved_wgs]
+        query = query.filter(Group.id.in_(gids)) if gids else query.filter(False)
+
     if current_user.role == "STUDENT":
         mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
         gids = [m.group_id for m in mems]
         query = query.filter(Group.id.in_(gids))
-    elif current_user.role == "STAFF":
-        owned_wids = [w.id for w in db.query(Workspace).filter(Workspace.created_by == current_user.id).all()]
-        query = query.filter(Group.workspace_id.in_(owned_wids))
 
     groups = query.all()
     result = []
@@ -1073,9 +1185,14 @@ def list_groups(
             GroupMembership.user_id == current_user.id
         ).first()
 
+        wg = db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.group_id == g.id,
+            WorkspaceGroup.status == "APPROVED"
+        ).first()
+
         result.append({
             "id": g.id,
-            "workspace_id": g.workspace_id,
+            "workspace_id": wg.workspace_id if wg else g.workspace_id,
             "group_number": g.group_number,
             "name": g.name,
             "description": g.description,
@@ -1095,7 +1212,10 @@ def create_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Create a new group (creator becomes leader). Can be created standalone or within a workspace."""
+    """Create a new group (creator becomes leader). Can be created standalone or within a workspace. Student only."""
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: Only students can create project groups.")
+
     group_number = None
     target_ws_id = body.workspace_id
 
@@ -1129,8 +1249,13 @@ def create_group(
                 db.add(acc)
                 db.flush()
 
-        # Auto-generate group_number: find max existing in this workspace
-        existing_groups = db.query(Group).filter(Group.workspace_id == target_ws_id).all()
+        # Auto-generate group_number: find max existing in this workspace via WorkspaceGroup
+        approved_wgs = db.query(WorkspaceGroup).filter(
+            WorkspaceGroup.workspace_id == target_ws_id,
+            WorkspaceGroup.status == "APPROVED"
+        ).all()
+        ws_gids = [wg.group_id for wg in approved_wgs]
+        existing_groups = db.query(Group).filter(Group.id.in_(ws_gids)).all() if ws_gids else []
         max_num = 0
         for eg in existing_groups:
             if eg.group_number and eg.group_number.startswith("G"):
@@ -1189,7 +1314,7 @@ def create_group(
 
     return {
         "id": grp.id,
-        "workspace_id": grp.workspace_id,
+        "workspace_id": target_ws_id,
         "group_number": grp.group_number,
         "name": grp.name,
         "code": grp.code,
@@ -1205,7 +1330,10 @@ def join_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Join an existing group using its code."""
+    """Join an existing group using its code. Student only."""
+    if current_user.role != "STUDENT":
+        raise HTTPException(status_code=403, detail="Forbidden: Only students can join project groups.")
+
     grp = db.query(Group).filter(Group.code == body.code).first()
     if not grp:
         raise HTTPException(status_code=404, detail="Group not found with the provided code.")
@@ -1751,17 +1879,27 @@ def create_project(
     db.add(act)
     db.commit()
 
-    # If group is connected to a workspace, auto-link project
+    # If group is connected to a workspace via WorkspaceGroup, auto-link project
     ws = None
-    if grp.workspace_id:
-        ws = db.query(Workspace).filter(Workspace.id == grp.workspace_id).first()
+    target_ws_id = None
+    wg = db.query(WorkspaceGroup).filter(
+        WorkspaceGroup.group_id == grp.id,
+        WorkspaceGroup.status == "APPROVED"
+    ).first()
+    if wg:
+        target_ws_id = wg.workspace_id
+    elif grp.workspace_id:
+        target_ws_id = grp.workspace_id
+
+    if target_ws_id:
+        ws = db.query(Workspace).filter(Workspace.id == target_ws_id).first()
         existing_wp = db.query(WorkspaceProject).filter(
-            WorkspaceProject.workspace_id == grp.workspace_id,
+            WorkspaceProject.workspace_id == target_ws_id,
             WorkspaceProject.project_id == project.id
         ).first()
         if not existing_wp:
             wp = WorkspaceProject(
-                workspace_id=grp.workspace_id,
+                workspace_id=target_ws_id,
                 project_id=project.id,
                 requested_by=current_user.id,
                 status="APPROVED"
@@ -1769,15 +1907,19 @@ def create_project(
             db.add(wp)
             db.commit()
 
-    # Update search index
-    request.app.state.search_index.add_project(project)
+    try:
+        request.app.state.search_index.add_project(project)
+    except Exception:
+        pass
 
     d = _project_dict(project, grp)
-    d["workspace_id"] = grp.workspace_id
+    d["workspace_id"] = target_ws_id
     d["workspace_name"] = ws.name if ws else ""
 
-    # Update Progress BST
-    request.app.state.progress_bst.insert(dict(d))
+    try:
+        request.app.state.progress_bst.insert(dict(d))
+    except Exception:
+        pass
 
     return d
 
@@ -2227,45 +2369,40 @@ def list_activities(
 @router.get("/search/projects")
 def search_projects(
     q: str = Query("", description="Search query"),
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Smart Search — delegates to dsa_engine.ProjectSearchIndex."""
-    idx = request.app.state.search_index
-    query = q.strip()
-    if not query:
+    """Smart Search — queries Neon PostgreSQL directly and enforces authorization filters."""
+    query_str = q.strip()
+    if not query_str:
         return {"query": q, "count": 0, "results": []}
 
-    # Gather potential matches
-    results = []
-    exact = idx.search_by_id(query)
-    if exact:
-        # Avoid mutating the indexed dict directly
-        results = [dict(exact)]
-    else:
-        name_hits = idx.search_by_name(query)
-        if name_hits:
-            results = [dict(r) for r in name_hits]
-        else:
-            partial = idx.partial_search(query)
-            results = [dict(r) for r in partial]
+    from sqlalchemy import or_
+    matching_projects = db.query(Project).filter(
+        or_(
+            Project.project_id.ilike(f"%{query_str}%"),
+            Project.name.ilike(f"%{query_str}%"),
+            Project.description.ilike(f"%{query_str}%"),
+            Project.course.ilike(f"%{query_str}%")
+        )
+    ).all()
 
-    # Filter results by role, user visibility, and workspace restrictions
     filtered = []
-    for r in results:
-        ws_id = r.get("workspace_id")
-        if ws_id and has_workspace_access(ws_id, current_user, db):
-            if current_user.role == "STUDENT":
-                mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
-                gids = {m.group_id for m in mems}
-                if r.get("group_id") in gids:
-                    filtered.append(r)
-            else:
-                filtered.append(r)
+    for proj in matching_projects:
+        if not has_project_access(proj, current_user, db):
+            continue
 
-    for r in filtered:
-        _enrich(r, db)
+        grp = db.query(Group).filter(Group.id == proj.group_id).first()
+        wp = db.query(WorkspaceProject).filter(
+            WorkspaceProject.project_id == proj.id,
+            WorkspaceProject.status == "APPROVED"
+        ).first()
+        ws = db.query(Workspace).filter(Workspace.id == wp.workspace_id).first() if wp else None
+
+        res_dict = _project_dict(proj, grp)
+        res_dict["workspace_id"] = ws.id if ws else None
+        res_dict["workspace_name"] = ws.name if ws else ""
+        filtered.append(res_dict)
 
     return {"query": q, "count": len(filtered), "results": filtered}
 
@@ -2309,89 +2446,86 @@ def _enrich(result: dict, db: Session):
 
 @router.get("/progress")
 def get_progress(
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve all projects sorted by progress using ProgressBST inorder traversal and filtered by scoping."""
-    bst = request.app.state.progress_bst
-    results = bst.inorder()
+    """Retrieve all projects sorted by progress using ProgressBST inorder traversal dynamically from DB."""
+    from dsa_engine import ProgressBST
+    bst = ProgressBST()
+    projects = db.query(Project).all()
+    for p in projects:
+        if has_project_access(p, current_user, db):
+            grp = db.query(Group).filter(Group.id == p.group_id).first()
+            wp = db.query(WorkspaceProject).filter(
+                WorkspaceProject.project_id == p.id,
+                WorkspaceProject.status == "APPROVED"
+            ).first()
+            ws = db.query(Workspace).filter(Workspace.id == wp.workspace_id).first() if wp else None
+            d = _project_dict(p, grp)
+            d["workspace_id"] = ws.id if ws else None
+            d["workspace_name"] = ws.name if ws else ""
+            bst.insert(d)
 
-    filtered = []
-    for r in results:
-        ws_id = r.get("workspace_id")
-        if ws_id and has_workspace_access(ws_id, current_user, db):
-            if current_user.role == "STUDENT":
-                mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
-                gids = {m.group_id for m in mems}
-                if r.get("group_id") in gids:
-                    filtered.append(r)
-            else:
-                filtered.append(r)
-
-    for r in filtered:
-        _enrich(r, db)
-
-    return filtered
+    return bst.inorder()
 
 
 @router.get("/progress/range")
 def get_progress_range(
     min: float = Query(0.0, alias="min"),
     max: float = Query(100.0, alias="max"),
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve projects within a progress range using ProgressBST and filter by role/user visibility."""
-    bst = request.app.state.progress_bst
-    results = bst.range_search(min, max)
+    """Retrieve projects within a progress range using ProgressBST constructed dynamically from DB."""
+    from dsa_engine import ProgressBST
+    bst = ProgressBST()
+    projects = db.query(Project).all()
+    for p in projects:
+        if has_project_access(p, current_user, db):
+            grp = db.query(Group).filter(Group.id == p.group_id).first()
+            wp = db.query(WorkspaceProject).filter(
+                WorkspaceProject.project_id == p.id,
+                WorkspaceProject.status == "APPROVED"
+            ).first()
+            ws = db.query(Workspace).filter(Workspace.id == wp.workspace_id).first() if wp else None
+            d = _project_dict(p, grp)
+            d["workspace_id"] = ws.id if ws else None
+            d["workspace_name"] = ws.name if ws else ""
+            bst.insert(d)
 
-    filtered = []
-    for r in results:
-        ws_id = r.get("workspace_id")
-        if ws_id and has_workspace_access(ws_id, current_user, db):
-            if current_user.role == "STUDENT":
-                mems = db.query(GroupMembership).filter(GroupMembership.user_id == current_user.id).all()
-                gids = {m.group_id for m in mems}
-                if r.get("group_id") in gids:
-                    filtered.append(r)
-            else:
-                filtered.append(r)
+    return bst.range_search(min, max)
 
-    for r in filtered:
-        _enrich(r, db)
 
-    return filtered
-
+# ─── Review Queue ────────────────────────────────────────────────────────────
 
 # ─── Review Queue ────────────────────────────────────────────────────────────
 
 @router.get("/review-queue")
 def get_review_queue(
     workspace_id: Optional[int] = None,
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve all pending review requests in FIFO order from the ReviewQueue, filtered by workspace."""
+    """Retrieve all pending review requests in FIFO order directly from Neon PostgreSQL, filtered by workspace."""
     if current_user.role != "STAFF":
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    q = request.app.state.review_queue
-    raw_items = list(q._items)
-    
+    requests = (
+        db.query(ReviewRequest)
+        .filter(ReviewRequest.status == "PENDING")
+        .order_by(ReviewRequest.created_at.asc())
+        .all()
+    )
+
     enriched_items = []
-    for item in raw_items:
-        proj = db.query(Project).filter(Project.id == item["project_id"]).first()
+    for req in requests:
+        proj = db.query(Project).filter(Project.id == req.project_id).first()
         if not proj:
             continue
-        # Resolve this project's approved workspace(s)
         wps = db.query(WorkspaceProject).filter(
             WorkspaceProject.project_id == proj.id,
             WorkspaceProject.status == "APPROVED"
         ).all()
-        # Faculty sees items only from their own workspaces
         visible = False
         for wp in wps:
             if workspace_id and wp.workspace_id != workspace_id:
@@ -2399,22 +2533,22 @@ def get_review_queue(
             if has_workspace_access(wp.workspace_id, current_user, db):
                 visible = True
                 break
-        if not visible:
+        if not visible and wps:
             continue
-        
+
         grp = db.query(Group).filter(Group.id == proj.group_id).first()
-        submitter = db.query(User).filter(User.id == item["submitted_by"]).first()
-        
+        submitter = db.query(User).filter(User.id == req.submitted_by).first()
+
         enriched_items.append({
-            "id": item["id"],
+            "id": req.id,
             "project_id": proj.project_id,
             "project_name": proj.name,
             "group_name": grp.name if grp else "N/A",
             "submitted_by": submitter.name if submitter else "Unknown",
-            "request_type": item["request_type"],
-            "message": item["message"],
-            "status": item["status"],
-            "created_at": item["created_at"],
+            "request_type": req.request_type,
+            "message": req.message,
+            "status": req.status,
+            "created_at": str(req.created_at),
         })
     return enriched_items
 
@@ -2422,20 +2556,22 @@ def get_review_queue(
 @router.get("/review-queue/next")
 def get_review_queue_next(
     workspace_id: Optional[int] = None,
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Peek the next pending review request in FIFO order (respecting workspace filtering if provided)."""
+    """Peek the next pending review request in FIFO order from Neon PostgreSQL."""
     if current_user.role != "STAFF":
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    q = request.app.state.review_queue
-    if q.is_empty():
-        return None
-    
-    for item in q._items:
-        proj = db.query(Project).filter(Project.id == item["project_id"]).first()
+    requests = (
+        db.query(ReviewRequest)
+        .filter(ReviewRequest.status == "PENDING")
+        .order_by(ReviewRequest.created_at.asc())
+        .all()
+    )
+
+    for req in requests:
+        proj = db.query(Project).filter(Project.id == req.project_id).first()
         if not proj:
             continue
         wps = db.query(WorkspaceProject).filter(
@@ -2451,13 +2587,12 @@ def get_review_queue_next(
                 visible = True
                 matched_ws_id = wp.workspace_id
                 break
-        if not visible:
+        if not visible and wps:
             continue
-        
-        grp = db.query(Group).filter(Group.id == proj.group_id).first()
-        submitter = db.query(User).filter(User.id == item["submitted_by"]).first()
 
-        # Include group members for the grading drill-down
+        grp = db.query(Group).filter(Group.id == proj.group_id).first()
+        submitter = db.query(User).filter(User.id == req.submitted_by).first()
+
         members_raw = db.query(GroupMembership).filter(GroupMembership.group_id == proj.group_id).all()
         members = []
         for m in members_raw:
@@ -2468,11 +2603,12 @@ def get_review_queue_next(
                     "name": u.name,
                     "user_id": u.user_id,
                     "email": u.email,
+                    "role": u.role,
                     "is_leader": m.is_leader,
                 })
 
         return {
-            "id": item["id"],
+            "id": req.id,
             "project_id": proj.project_id,
             "project_internal_id": proj.id,
             "project_name": proj.name,
@@ -2480,10 +2616,10 @@ def get_review_queue_next(
             "group_name": grp.name if grp else "N/A",
             "workspace_id": matched_ws_id,
             "submitted_by": submitter.name if submitter else "Unknown",
-            "request_type": item["request_type"],
-            "message": item["message"],
-            "status": item["status"],
-            "created_at": item["created_at"],
+            "request_type": req.request_type,
+            "message": req.message,
+            "status": req.status,
+            "created_at": str(req.created_at),
             "members": members,
         }
     return None
@@ -2492,20 +2628,22 @@ def get_review_queue_next(
 @router.get("/review-queue/count")
 def get_review_queue_count(
     workspace_id: Optional[int] = None,
-    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve count of pending review requests for staff."""
+    """Retrieve count of pending review requests for staff from Neon PostgreSQL."""
     if current_user.role != "STAFF":
         return {"count": 0}
 
-    q = request.app.state.review_queue
-    raw_items = list(q._items)
-    
+    requests = (
+        db.query(ReviewRequest)
+        .filter(ReviewRequest.status == "PENDING")
+        .all()
+    )
+
     count = 0
-    for item in raw_items:
-        proj = db.query(Project).filter(Project.id == item["project_id"]).first()
+    for req in requests:
+        proj = db.query(Project).filter(Project.id == req.project_id).first()
         if not proj:
             continue
         wps = db.query(WorkspaceProject).filter(
@@ -2524,11 +2662,10 @@ def get_review_queue_count(
 @router.post("/review-queue", status_code=201)
 def submit_review_request(
     body: ReviewRequestCreate,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Submit a review request and enqueue it."""
+    """Submit a review request into Neon PostgreSQL review_requests table."""
     proj = db.query(Project).filter(Project.id == body.project_id).first()
     if not proj:
         raise HTTPException(404, "Project not found")
@@ -2537,7 +2674,6 @@ def submit_review_request(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     if current_user.role == "STUDENT":
-        # must be group member
         mems = db.query(GroupMembership).filter(
             GroupMembership.user_id == current_user.id,
             GroupMembership.group_id == proj.group_id
@@ -2558,7 +2694,6 @@ def submit_review_request(
     )
     db.add(req)
 
-    # Activity log for Review Request
     act = Activity(
         project_id=proj.id,
         user_id=current_user.id,
@@ -2570,7 +2705,7 @@ def submit_review_request(
     db.commit()
     db.refresh(req)
 
-    data = {
+    return {
         "id": req.id,
         "project_id": req.project_id,
         "submitted_by": req.submitted_by,
@@ -2580,45 +2715,51 @@ def submit_review_request(
         "created_at": str(req.created_at),
     }
 
-    # Push to in-memory ReviewQueue
-    request.app.state.review_queue.enqueue(data)
-
-    return data
-
 
 @router.post("/review-queue/process")
 def process_review_request(
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Process (DEQUEUE) the oldest pending review request."""
+    """Process (DEQUEUE) the oldest pending review request in Neon PostgreSQL."""
     if current_user.role != "STAFF":
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    q = request.app.state.review_queue
-    if q.is_empty():
+    req = (
+        db.query(ReviewRequest)
+        .filter(ReviewRequest.status == "PENDING")
+        .order_by(ReviewRequest.created_at.asc())
+        .first()
+    )
+    if not req:
         raise HTTPException(400, "Review queue is empty")
-    
-    item = q.dequeue()
-    
-    # Update status in DB
-    req = db.query(ReviewRequest).filter(ReviewRequest.id == item["id"]).first()
-    if req:
-        req.status = "PROCESSED"
-        proj = db.query(Project).filter(Project.id == req.project_id).first()
-        if proj:
-            act = Activity(
-                project_id=proj.id,
-                user_id=current_user.id,
-                activity_type="REVIEW_PROCESSED",
-                message=f"Review request '{req.request_type}' approved and processed by {current_user.name}."
-            )
-            db.add(act)
-        db.commit()
-        db.refresh(req)
-    
-    return {"success": True, "processed_id": item["id"], "request": item}
+
+    req.status = "PROCESSED"
+    proj = db.query(Project).filter(Project.id == req.project_id).first()
+    if proj:
+        act = Activity(
+            project_id=proj.id,
+            user_id=current_user.id,
+            activity_type="REVIEW_PROCESSED",
+            message=f"Review request '{req.request_type}' approved and processed by {current_user.name}."
+        )
+        db.add(act)
+    db.commit()
+    db.refresh(req)
+
+    return {
+        "success": True,
+        "processed_id": req.id,
+        "request": {
+            "id": req.id,
+            "project_id": req.project_id,
+            "submitted_by": req.submitted_by,
+            "request_type": req.request_type,
+            "message": req.message,
+            "status": req.status,
+            "created_at": str(req.created_at),
+        }
+    }
 
 
 # ─── Workspace Restrictions & Access (Staff Only) ──────────────────────────────────
@@ -3470,3 +3611,195 @@ def get_workspace_project_detail(
             for ms in milestones
         ],
     }
+
+
+# ─── GitHub Integration Endpoints ─────────────────────────────────────────────
+
+def _get_project_with_access_check(project_id: str, current_user: User, db: Session) -> Project:
+    """Helper to retrieve project and verify current user has authorization."""
+    proj = db.query(Project).filter(Project.project_id == project_id).first()
+    if not proj and project_id.isdigit():
+        proj = db.query(Project).filter(Project.id == int(project_id)).first()
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    has_access = False
+    if current_user.role == "STUDENT":
+        mems = db.query(GroupMembership).filter(
+            GroupMembership.user_id == current_user.id,
+            GroupMembership.group_id == proj.group_id
+        ).first()
+        if mems:
+            has_access = True
+    elif current_user.role == "STAFF":
+        wps = db.query(WorkspaceProject).filter(
+            WorkspaceProject.project_id == proj.id,
+            WorkspaceProject.status == "APPROVED"
+        ).all()
+        if not wps:
+            has_access = True
+        else:
+            for wp in wps:
+                if has_workspace_access(wp.workspace_id, current_user, db):
+                    has_access = True
+                    break
+
+    if not has_access:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not have access to this project.")
+
+    return proj
+
+
+@router.post("/projects/{project_id}/github", status_code=200)
+def connect_github_repository(
+    project_id: str,
+    body: GitHubConnectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Connect or update a GitHub repository associated with a MeshVault project."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    try:
+        owner, repo = parse_github_url(body.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    repo_info = fetch_repo_info(owner, repo)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    canonical_url = f"https://github.com/{owner}/{repo}"
+
+    if github_record:
+        github_record.github_owner = owner
+        github_record.github_repo = repo
+        github_record.github_url = canonical_url
+        github_record.linked_at = datetime.utcnow()
+    else:
+        github_record = ProjectGitHub(
+            project_id=proj.id,
+            github_owner=owner,
+            github_repo=repo,
+            github_url=canonical_url,
+            linked_at=datetime.utcnow()
+        )
+        db.add(github_record)
+
+    db.commit()
+
+    repo_info["linked_at"] = str(github_record.linked_at)
+    return {
+        "success": True,
+        "message": f"Successfully connected repository {owner}/{repo}.",
+        "data": repo_info
+    }
+
+
+@router.get("/projects/{project_id}/github")
+def get_github_repository(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get GitHub repository metadata for a MeshVault project."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    if not github_record:
+        return {"linked": False, "data": None}
+
+    repo_info = fetch_repo_info(github_record.github_owner, github_record.github_repo)
+    repo_info["linked_at"] = str(github_record.linked_at)
+
+    return {
+        "linked": True,
+        "data": repo_info
+    }
+
+
+@router.delete("/projects/{project_id}/github")
+def disconnect_github_repository(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unlink a GitHub repository from a MeshVault project."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    if not github_record:
+        raise HTTPException(status_code=404, detail="No GitHub repository associated with this project.")
+
+    db.delete(github_record)
+    db.commit()
+
+    return {"success": True, "message": "GitHub repository unlinked successfully."}
+
+
+@router.get("/projects/{project_id}/github/commits")
+def get_github_commits(
+    project_id: str,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch recent commits for the project's linked GitHub repository."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    if not github_record:
+        raise HTTPException(status_code=404, detail="No GitHub repository linked to this project.")
+
+    return fetch_commits(github_record.github_owner, github_record.github_repo, limit=min(limit, 30))
+
+
+@router.get("/projects/{project_id}/github/contributors")
+def get_github_contributors(
+    project_id: str,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch contributors for the project's linked GitHub repository."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    if not github_record:
+        raise HTTPException(status_code=404, detail="No GitHub repository linked to this project.")
+
+    return fetch_contributors(github_record.github_owner, github_record.github_repo, limit=min(limit, 30))
+
+
+@router.get("/projects/{project_id}/github/issues")
+def get_github_issues(
+    project_id: str,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch issues for the project's linked GitHub repository."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    if not github_record:
+        raise HTTPException(status_code=404, detail="No GitHub repository linked to this project.")
+
+    return fetch_issues(github_record.github_owner, github_record.github_repo, limit=min(limit, 30))
+
+
+@router.get("/projects/{project_id}/github/pulls")
+def get_github_pulls(
+    project_id: str,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Fetch pull requests for the project's linked GitHub repository."""
+    proj = _get_project_with_access_check(project_id, current_user, db)
+
+    github_record = db.query(ProjectGitHub).filter(ProjectGitHub.project_id == proj.id).first()
+    if not github_record:
+        raise HTTPException(status_code=404, detail="No GitHub repository linked to this project.")
+
+    return fetch_pulls(github_record.github_owner, github_record.github_repo, limit=min(limit, 30))
+

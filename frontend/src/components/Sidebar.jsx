@@ -7,9 +7,6 @@ import {
   FolderGit2,
   GraduationCap,
   Search,
-  Zap,
-  TrendingUp,
-  Clock,
   ClipboardList,
   History,
   GitBranch,
@@ -31,13 +28,11 @@ export default function Sidebar() {
         const res = await projectService.getReviewQueueCount();
         setPendingReviewCount(res.count || 0);
       } catch (err) {
-        // Silently ignore background polling errors
+        // Silently ignore errors
       }
     };
 
     checkPendingReviews();
-    const interval = setInterval(checkPendingReviews, 6000);
-    return () => clearInterval(interval);
   }, [user]);
 
   const coreNav = [
@@ -50,9 +45,6 @@ export default function Sidebar() {
   ];
 
   const dsaNav = [
-    { path: '/priority-engine', label: 'Priority Engine', icon: Zap },
-    { path: '/progress-analytics', label: 'Progress Analytics', icon: TrendingUp },
-    { path: '/sprint-optimizer', label: 'Sprint Optimizer', icon: Clock },
     ...(user?.role === 'STAFF' ? [{
       path: '/review-queue',
       label: 'Review Queue',
@@ -60,7 +52,7 @@ export default function Sidebar() {
       badge: pendingReviewCount > 0 ? pendingReviewCount : null,
     }] : []),
     { path: '/audit-trail', label: 'Audit Trail', icon: History },
-    ...(user?.role === 'STUDENT' ? [{ path: '/github', label: 'GitHub Sync', icon: GitBranch }] : []),
+    { path: '/github', label: 'GitHub Sync', icon: GitBranch },
   ];
 
   const renderLink = (item) => {

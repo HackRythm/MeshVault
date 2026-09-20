@@ -5,6 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import projectService from '../services/projectService';
 import { useAuth } from '../context/AuthContext';
 import StudentGradingPanel from '../components/StudentGradingPanel';
+import GitHubRepoSection from '../components/GitHubRepoSection';
 
 export default function ProjectDetail() {
   const { projectId } = useParams();
@@ -309,6 +310,9 @@ export default function ProjectDetail() {
               {project.description || 'No description available for this project.'}
             </p>
           </div>
+
+          {/* GitHub Repository Section */}
+          <GitHubRepoSection projectId={project.project_id} />
 
           {/* Student: Submit review request */}
           {user.role === 'STUDENT' && (

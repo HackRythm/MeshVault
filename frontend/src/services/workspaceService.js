@@ -13,6 +13,10 @@ const workspaceService = {
     return api.post(`/api/workspaces`, data);
   },
 
+  async updateWorkspace(id, data) {
+    return api.put(`/api/workspaces/${id}`, data);
+  },
+
   async getWorkspaceAccess(id) {
     return api.get(`/api/workspaces/${id}/access`);
   },

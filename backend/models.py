@@ -213,6 +213,9 @@ class Project(Base):
     activities = relationship(
         "Activity", back_populates="project", cascade="all, delete-orphan"
     )
+    github_repo = relationship(
+        "ProjectGitHub", back_populates="project", uselist=False, cascade="all, delete-orphan"
+    )
 
     def __repr__(self):
         return f"<Project {self.project_id}: {self.name}>"
@@ -435,4 +438,24 @@ class StudentGrade(Base):
 
     def __repr__(self):
         return f"<StudentGrade id={self.id} student={self.student_id} project={self.project_id} released={self.is_released}>"
+
+
+# ─── Project GitHub Association ───────────────────────────────────────────────
+
+class ProjectGitHub(Base):
+    __tablename__ = "project_github"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    github_owner = Column(String(100), nullable=False)
+    github_repo = Column(String(100), nullable=False)
+    github_url = Column(String(255), nullable=False)
+    linked_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project", back_populates="github_repo")
+
+    def __repr__(self):
+        return f"<ProjectGitHub project_id={self.project_id} repo={self.github_owner}/{self.github_repo}>"
+
 

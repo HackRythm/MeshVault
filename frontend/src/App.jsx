@@ -20,6 +20,7 @@ import ProgressAnalytics from './pages/ProgressAnalytics';
 import ReviewQueue from './pages/ReviewQueue';
 import AuditTrail from './pages/AuditTrail';
 import MyGrades from './pages/MyGrades';
+import GitHubSync from './pages/GitHubSync';
 
 // Protected Route Wrapper
 function PrivateRoute({ children }) {
@@ -63,7 +64,7 @@ export default function App() {
         </PrivateRoute>
       } />
       <Route path="/audit-trail" element={<PrivateRoute><AuditTrail /></PrivateRoute>} />
-      <Route path="/github" element={<PrivateRoute><Building title="GitHub Sync" /></PrivateRoute>} />
+      <Route path="/github" element={<PrivateRoute><GitHubSync /></PrivateRoute>} />
 
       {/* Redirect fallbacks */}
       <Route path="/" element={<Navigate to="/login" replace />} />

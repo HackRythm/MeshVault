@@ -55,6 +55,14 @@ class WorkspaceCreate(BaseModel):
     description: Optional[str] = None
 
 
+class WorkspaceUpdate(BaseModel):
+    name: Optional[str] = None
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
+    academic_year: Optional[str] = None
+    description: Optional[str] = None
+
+
 
 class WorkspaceOut(BaseModel):
     id: int
@@ -367,3 +375,53 @@ class StudentGradeCreate(BaseModel):
     max_score: float = 100.0
     notes: Optional[str] = None
     criterion_scores: Optional[List[CriterionScore]] = None
+
+
+# ─── GitHub Integration ──────────────────────────────────────────────────────
+
+class GitHubConnectRequest(BaseModel):
+    url: str
+
+class GitHubRepoData(BaseModel):
+    name: str
+    owner: str
+    description: Optional[str] = None
+    url: str
+    default_branch: str
+    language: Optional[str] = None
+    stars: int
+    forks: int
+    open_issues: int
+    linked_at: Optional[str] = None
+
+class GitHubCommitItem(BaseModel):
+    sha: str
+    message: str
+    author: str
+    date: str
+    url: str
+
+class GitHubContributorItem(BaseModel):
+    username: str
+    avatar: str
+    contributions: int
+    profile_url: str
+
+class GitHubIssueItem(BaseModel):
+    number: int
+    title: str
+    state: str
+    author: str
+    labels: List[str] = []
+    created_at: str
+    url: str
+
+class GitHubPullItem(BaseModel):
+    number: int
+    title: str
+    state: str
+    author: str
+    created_at: str
+    updated_at: str
+    url: str
+

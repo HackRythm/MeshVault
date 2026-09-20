@@ -158,6 +158,43 @@ const projectService = {
   async getAllMyGrades() {
     return api.get('/api/student/my-grades');
   },
+
+  // ─── GitHub Repository Integration ──────────────────────────────────────────
+
+  /** Connect a GitHub repository URL to a project */
+  async connectGitHub(projectId, url) {
+    return api.post(`/api/projects/${projectId}/github`, { url });
+  },
+
+  /** Get linked GitHub repository info */
+  async getGitHubInfo(projectId) {
+    return api.get(`/api/projects/${projectId}/github`);
+  },
+
+  /** Disconnect GitHub repository from project */
+  async disconnectGitHub(projectId) {
+    return api.delete(`/api/projects/${projectId}/github`);
+  },
+
+  /** Get recent commits for linked GitHub repository */
+  async getGitHubCommits(projectId) {
+    return api.get(`/api/projects/${projectId}/github/commits`);
+  },
+
+  /** Get contributors for linked GitHub repository */
+  async getGitHubContributors(projectId) {
+    return api.get(`/api/projects/${projectId}/github/contributors`);
+  },
+
+  /** Get issues for linked GitHub repository */
+  async getGitHubIssues(projectId) {
+    return api.get(`/api/projects/${projectId}/github/issues`);
+  },
+
+  /** Get pull requests for linked GitHub repository */
+  async getGitHubPulls(projectId) {
+    return api.get(`/api/projects/${projectId}/github/pulls`);
+  },
 };
 
 export default projectService;
