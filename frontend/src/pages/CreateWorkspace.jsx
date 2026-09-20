@@ -20,8 +20,8 @@ export default function CreateWorkspace() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!workspaceId.trim() || !name || !courseCode || !courseName || !academicYear) {
-      setError('Please fill in all required fields, including the unique Workspace Code / ID.');
+    if (!name.trim() || !courseCode.trim() || !courseName.trim() || !academicYear.trim()) {
+      setError('Please fill in all required fields (Workspace Name, Course Code, Course Name, Academic Year).');
       return;
     }
 
@@ -30,7 +30,7 @@ export default function CreateWorkspace() {
 
     try {
       const data = {
-        workspace_id: workspaceId.trim(),
+        workspace_id: workspaceId.trim() || undefined,
         name: name.trim(),
         course_code: courseCode.trim(),
         course_name: courseName.trim(),

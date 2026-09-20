@@ -427,8 +427,16 @@ export default function Workspace() {
             </button>
           )}
         </div>
-        <EmptyState icon="📂" title="No workspaces assigned" text="You do not have access to any workspaces at the moment." />
+        <EmptyState icon="📂" title="No workspaces assigned" text="You do not have any active academic workspaces at the moment." />
         
+        {user.role === 'STAFF' && (
+          <div style={{ textAlign: 'center', marginTop: '-16px', marginBottom: '32px' }}>
+            <Link to="/workspace/new" className="btn btn--primary btn--lg" style={{ padding: '12px 24px', fontSize: '15px' }}>
+              ➕ Create Your First Academic Workspace
+            </Link>
+          </div>
+        )}
+
         {user.role === 'STUDENT' && (
           <div style={{ textAlign: 'center', marginTop: '-16px', marginBottom: '32px' }}>
             <button
