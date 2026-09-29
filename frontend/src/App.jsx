@@ -21,6 +21,7 @@ import ReviewQueue from './pages/ReviewQueue';
 import AuditTrail from './pages/AuditTrail';
 import MyGrades from './pages/MyGrades';
 import GitHubSync from './pages/GitHubSync';
+import StyleTiles from './pages/StyleTiles';
 
 // Protected Route Wrapper
 function PrivateRoute({ children }) {
@@ -33,6 +34,9 @@ export default function App() {
 
   return (
     <Routes>
+      {/* Live Style Tiles Route */}
+      <Route path="/style-tiles" element={<StyleTiles />} />
+
       {/* Public Route */}
       <Route path="/login" element={<Login />} />
 
